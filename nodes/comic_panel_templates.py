@@ -87,6 +87,14 @@ class PanelShape:
     polygon: List[Tuple[float, float]]
 
 
+@dataclass
+class DiagonalInfo:
+    """Information about diagonal separators."""
+    horizontal: bool = False  # Diagonal between rows
+    vertical: bool = False    # Diagonal between columns within a row
+    angle: float = 0.2        # Diagonal offset ratio (0.0 to 1.0)
+
+
 def interpolate(value_left: float, value_right: float, position: float, span: float) -> float:
     """Linearly interpolate between two values across a span."""
     if span <= 0:
@@ -130,6 +138,79 @@ def parse_layout_sequence(sequence: str) -> tuple[List[int], List[bool]]:
         diagonals = []
 
     return counts, diagonals
+
+
+def parse_enhanced_layout_sequence(sequence: str) -> tuple[List[int], List[DiagonalInfo], List[DiagonalInfo]]:
+    """
+    Parse enhanced sequence string with support for vertical and horizontal diagonals.
+    
+    Examples:
+    - "1|2"     -> [1,2], [DiagonalInfo(vertical=True)], []
+    - "1/2"     -> [1,2], [DiagonalInfo(horizontal=True)], []  
+    - "1/2|"    -> [1,2], [DiagonalInfo(horizontal=True)], [DiagonalInfo(vertical=True)]
+    """
+    counts: List[int] = []
+    row_diagonals: List[DiagonalInfo] = []  # Between rows
+    col_diagonals: List[DiagonalInfo] = []  # Within rows (between columns)
+    
+    # Split by angle specifier first
+    if ':' in sequence:
+        layout_part, angle_part = sequence.rsplit(':', 1)
+        try:
+            angle_degrees = float(angle_part)
+            angle_ratio = min(max(angle_degrees / 90.0, 0.0), 1.0)
+        except ValueError:
+            angle_ratio = 0.2
+    else:
+        layout_part = sequence
+        angle_ratio = 0.2
+    
+    # Parse each character
+    i = 0
+    pending_horizontal = False
+    pending_vertical = False
+    
+    while i < len(layout_part):
+        char = layout_part[i]
+        
+        if char.isdigit():
+            counts.append(int(char))
+            
+            # Apply pending diagonal flags to row transitions
+            if len(counts) > 1 and len(row_diagonals) < len(counts) - 1:
+                diag_info = DiagonalInfo(angle=angle_ratio)
+                if pending_horizontal:
+                    diag_info.horizontal = True
+                    pending_horizontal = False
+                row_diagonals.append(diag_info)
+            
+            # Apply vertical diagonal to this specific row
+            if pending_vertical:
+                # Ensure we have col_diagonals for this row index
+                while len(col_diagonals) < len(counts):
+                    col_diagonals.append(DiagonalInfo(angle=angle_ratio))
+                col_diagonals[len(counts) - 1].vertical = True
+                pending_vertical = False
+                
+        elif char == '/':
+            pending_horizontal = True
+            
+        elif char == '|':
+            pending_vertical = True
+            
+        i += 1
+    
+    # Ensure proper counts
+    while len(row_diagonals) < len(counts) - 1:
+        row_diagonals.append(DiagonalInfo(angle=angle_ratio))
+    
+    while len(col_diagonals) < len(counts):
+        col_diagonals.append(DiagonalInfo(angle=angle_ratio))
+    
+    if not counts:
+        counts = [1]
+    
+    return counts, row_diagonals, col_diagonals
 
 
 def mirror_polygon_horizontally(polygon: Sequence[Tuple[float, float]], width: int) -> List[Tuple[float, float]]:
@@ -300,7 +381,7 @@ class CR_ComicPanelTemplates:
             },
             "optional": {
                 "images": ("IMAGE",),
-                "custom_panel_layout": ("STRING", {"multiline": False, "default": "H123"}),
+                "custom_panel_layout": ("STRING", {"multiline": False, "default": "H1|2:30"}),
                 "outline_color_hex": ("STRING", {"multiline": False, "default": "#000000"}),
                 "panel_color_hex": ("STRING", {"multiline": False, "default": "#000000"}),
                 "bg_color_hex": ("STRING", {"multiline": False, "default": "#FFFFFF"}),
@@ -324,7 +405,7 @@ class CR_ComicPanelTemplates:
         panel_color: str,
         background_color: str,
         images: Optional[Iterable[torch.Tensor]] = None,
-        custom_panel_layout: str = "H123",
+        custom_panel_layout: str = "H1|2:30",
         outline_color_hex: str = "#000000",
         panel_color_hex: str = "#000000",
         bg_color_hex: str = "#FFFFFF",
@@ -342,16 +423,19 @@ class CR_ComicPanelTemplates:
         page = Image.new("RGB", (content_width, content_height), background_rgb)
 
         if template == "custom":
-            template = custom_panel_layout.strip() or "H123"
+            template = custom_panel_layout.strip() or "H1|2:30"
 
         first_char = template[0].upper()
         image_index = 0
         total_images = len(pil_images)
         draw = ImageDraw.Draw(page)
 
-        use_diagonal = "/" in template
+        # Check for enhanced diagonal syntax
+        use_enhanced = "|" in template or ":" in template
+        use_diagonal = "/" in template or use_enhanced
 
         if not use_diagonal:
+            # Original non-diagonal code remains the same
             if first_char == "G":
                 rows = safe_digit(template[1], default=1)
                 columns = safe_digit(template[2], default=1)
@@ -430,36 +514,56 @@ class CR_ComicPanelTemplates:
             else:
                 draw.text((10, 10), "Unknown template", fill=(255, 0, 0))
         else:
+            # Enhanced diagonal handling
             panels: List[PanelShape] = []
-            diag_offset_ratio = 0.2
 
             if first_char == "H":
-                row_counts, row_diagonals = parse_layout_sequence(template[1:])
+                if use_enhanced:
+                    row_counts, row_diagonals = parse_enhanced_layout_sequence(template[1:])
+                else:
+                    row_counts, old_diagonals = parse_layout_sequence(template[1:])
+                    # Convert old format to new format
+                    row_diagonals = [DiagonalInfo(horizontal=diag) for diag in old_diagonals]
+                
                 margin = border_thickness + outline_thickness
                 panel_height = compute_panel_span(page.height, len(row_counts), border_thickness, outline_thickness)
                 cell_height = panel_height + 2 * margin
-                offset_y = page.height * diag_offset_ratio
 
                 top_left = 0.0
                 top_right = 0.0
+                
                 for index, count in enumerate(row_counts):
                     panel_width = compute_panel_span(page.width, count, border_thickness, outline_thickness)
                     cell_width = panel_width + 2 * margin
 
                     bottom_left = clamp(top_left + cell_height, 0.0, float(page.height))
                     bottom_right = clamp(top_right + cell_height, 0.0, float(page.height))
-                    diagonal_below = row_diagonals[index] if index < len(row_diagonals) else False
-                    if diagonal_below:
+                    
+                    diagonal_info = row_diagonals[index] if index < len(row_diagonals) else DiagonalInfo()
+                    
+                    # Apply horizontal diagonal
+                    if diagonal_info.horizontal:
+                        offset_y = page.height * diagonal_info.angle
                         bottom_right = clamp(bottom_right + offset_y, 0.0, float(page.height))
 
+                    # Generate panels for this row
                     x_position = 0.0
                     for column in range(count):
                         left = clamp(x_position, 0.0, float(page.width))
                         right = clamp(left + cell_width, 0.0, float(page.width))
+                        
                         top_left_y = clamp(interpolate(top_left, top_right, left, page.width), 0.0, float(page.height))
                         top_right_y = clamp(interpolate(top_left, top_right, right, page.width), 0.0, float(page.height))
                         bottom_left_y = clamp(interpolate(bottom_left, bottom_right, left, page.width), 0.0, float(page.height))
                         bottom_right_y = clamp(interpolate(bottom_left, bottom_right, right, page.width), 0.0, float(page.height))
+                        
+                        # Apply vertical diagonal within this row
+                        if diagonal_info.vertical and column < count - 1:
+                            offset_x = page.width * diagonal_info.angle
+                            # Modify the right edge for vertical diagonal effect
+                            top_right_y = clamp(top_right_y - offset_x, 0.0, float(page.height))
+                            bottom_right_y = clamp(bottom_right_y + offset_x, 0.0, float(page.height))
+                        
                         panels.append(
                             PanelShape(
                                 polygon=[
@@ -474,33 +578,45 @@ class CR_ComicPanelTemplates:
 
                     top_left = bottom_left
                     top_right = bottom_right
+                    
             elif first_char == "V":
-                column_counts, column_diagonals = parse_layout_sequence(template[1:])
+                # Similar logic for vertical layouts with enhanced diagonals
+                if use_enhanced:
+                    column_counts, column_diagonals = parse_enhanced_layout_sequence(template[1:])
+                else:
+                    column_counts, old_diagonals = parse_layout_sequence(template[1:])
+                    column_diagonals = [DiagonalInfo(horizontal=diag) for diag in old_diagonals]
+                
                 margin = border_thickness + outline_thickness
                 panel_width = compute_panel_span(page.width, len(column_counts), border_thickness, outline_thickness)
                 cell_width = panel_width + 2 * margin
-                offset_x = page.width * diag_offset_ratio
 
                 left_top = 0.0
                 left_bottom = 0.0
+                
                 for index, count in enumerate(column_counts):
                     panel_height = compute_panel_span(page.height, count, border_thickness, outline_thickness)
                     cell_height = panel_height + 2 * margin
+                    
                     right_top = clamp(left_top + cell_width, 0.0, float(page.width))
                     right_bottom = clamp(left_bottom + cell_width, 0.0, float(page.width))
 
-                    diagonal_below = column_diagonals[index] if index < len(column_diagonals) else False
-                    if diagonal_below:
+                    diagonal_info = column_diagonals[index] if index < len(column_diagonals) else DiagonalInfo()
+                    
+                    if diagonal_info.horizontal:
+                        offset_x = page.width * diagonal_info.angle
                         right_bottom = clamp(right_bottom + offset_x, 0.0, float(page.width))
 
                     y_position = 0.0
                     for row in range(count):
                         top = clamp(y_position, 0.0, float(page.height))
                         bottom = clamp(top + cell_height, 0.0, float(page.height))
+                        
                         left_top_x = clamp(interpolate(left_top, left_bottom, top, page.height), 0.0, float(page.width))
                         left_bottom_x = clamp(interpolate(left_top, left_bottom, bottom, page.height), 0.0, float(page.width))
                         right_top_x = clamp(interpolate(right_top, right_bottom, top, page.height), 0.0, float(page.width))
                         right_bottom_x = clamp(interpolate(right_top, right_bottom, bottom, page.height), 0.0, float(page.width))
+                        
                         panels.append(
                             PanelShape(
                                 polygon=[
@@ -542,5 +658,5 @@ class CR_ComicPanelTemplates:
         if border_thickness > 0:
             page = ImageOps.expand(page, border_thickness, background_rgb)
 
-        show_help = "MangaPanelizer: Configure manga-ready panel grids."
+        show_help = "MangaPanelizer: Configure manga-ready panel grids. Use | for vertical diagonals, :angle for custom angles."
         return (pil2tensor(page), show_help)

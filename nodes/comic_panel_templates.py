@@ -549,34 +549,55 @@ class CR_ComicPanelTemplates:
                         bottom_right = clamp(bottom_right + offset_y, 0.0, float(page.height))
 
                     # Generate panels for this row
-                    x_position = 0.0
+                    left_top_x = 0.0
+                    left_bottom_x = 0.0
                     for column in range(count):
-                        left = clamp(x_position, 0.0, float(page.width))
-                        right = clamp(left + cell_width, 0.0, float(page.width))
-                        
-                        top_left_y = clamp(interpolate(top_left, top_right, left, page.width), 0.0, float(page.height))
-                        top_right_y = clamp(interpolate(top_left, top_right, right, page.width), 0.0, float(page.height))
-                        bottom_left_y = clamp(interpolate(bottom_left, bottom_right, left, page.width), 0.0, float(page.height))
-                        bottom_right_y = clamp(interpolate(bottom_left, bottom_right, right, page.width), 0.0, float(page.height))
-                        
-                        # Apply vertical diagonal within this row
+                        left_top = clamp(left_top_x, 0.0, float(page.width))
+                        left_bottom = clamp(left_bottom_x, 0.0, float(page.width))
+
+                        right_top = clamp(left_top + cell_width, 0.0, float(page.width))
+                        right_bottom = clamp(left_bottom + cell_width, 0.0, float(page.width))
+
+                        # Apply vertical diagonal within this row by shifting x coordinates
                         if vertical_info.vertical and column < count - 1:
-                            offset_x = page.width * vertical_info.angle
-                            # Modify the right edge for vertical diagonal effect
-                            top_right_y = clamp(top_right_y - offset_x, 0.0, float(page.height))
-                            bottom_right_y = clamp(bottom_right_y + offset_x, 0.0, float(page.height))
-                        
+                            offset = page.height * vertical_info.angle
+                            right_top = clamp(right_top - offset, 0.0, float(page.width))
+                            right_bottom = clamp(right_bottom + offset, 0.0, float(page.width))
+
+                        top_left_y = clamp(
+                            interpolate(top_left, top_right, left_top, page.width),
+                            0.0,
+                            float(page.height),
+                        )
+                        top_right_y = clamp(
+                            interpolate(top_left, top_right, right_top, page.width),
+                            0.0,
+                            float(page.height),
+                        )
+                        bottom_left_y = clamp(
+                            interpolate(bottom_left, bottom_right, left_bottom, page.width),
+                            0.0,
+                            float(page.height),
+                        )
+                        bottom_right_y = clamp(
+                            interpolate(bottom_left, bottom_right, right_bottom, page.width),
+                            0.0,
+                            float(page.height),
+                        )
+
                         panels.append(
                             PanelShape(
                                 polygon=[
-                                    (left, top_left_y),
-                                    (right, top_right_y),
-                                    (right, bottom_right_y),
-                                    (left, bottom_left_y),
+                                    (left_top, top_left_y),
+                                    (right_top, top_right_y),
+                                    (right_bottom, bottom_right_y),
+                                    (left_bottom, bottom_left_y),
                                 ]
                             )
                         )
-                        x_position = right
+
+                        left_top_x = right_top
+                        left_bottom_x = right_bottom
 
                     top_left = bottom_left
                     top_right = bottom_right

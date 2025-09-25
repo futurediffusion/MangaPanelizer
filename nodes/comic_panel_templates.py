@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from dataclasses import dataclass
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -71,6 +72,150 @@ def compute_panel_span(total: int, count: int, border: int, outline: int) -> int
     """Determine how much space a panel can occupy along one axis."""
     available = max(total - (2 * count * (border + outline)), 1)
     return max(available // max(count, 1), 1)
+
+
+def safe_int(value: str, default: int = 1) -> int:
+    """Parse an integer from text, falling back gracefully."""
+    try:
+        return max(int(value), 1)
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass
+class PanelShape:
+    polygon: List[Tuple[float, float]]
+
+
+def interpolate(value_left: float, value_right: float, position: float, span: float) -> float:
+    """Linearly interpolate between two values across a span."""
+    if span <= 0:
+        return value_left
+    ratio = min(max(position / span, 0.0), 1.0)
+    return value_left + (value_right - value_left) * ratio
+
+
+def clamp(value: float, minimum: float, maximum: float) -> float:
+    """Clamp a value to an inclusive range."""
+    return max(minimum, min(value, maximum))
+
+
+def parse_layout_sequence(sequence: str) -> tuple[List[int], List[bool]]:
+    """Parse a sequence string (e.g. "1/23") into counts and diagonal flags."""
+    counts: List[int] = []
+    diagonals: List[bool] = []
+    previous_was_digit = False
+
+    for char in sequence:
+        if char.isdigit():
+            counts.append(safe_int(char))
+            if len(counts) > 1 and len(diagonals) < len(counts) - 1:
+                diagonals.append(False)
+            previous_was_digit = True
+        elif char == "/" and previous_was_digit and counts:
+            index = len(counts) - 1
+            if len(diagonals) < index:
+                diagonals.extend([False] * (index - len(diagonals)))
+            diagonals[index - 1] = True
+            previous_was_digit = False
+        else:
+            previous_was_digit = False
+
+    if counts and len(diagonals) < len(counts) - 1:
+        diagonals.extend([False] * (len(counts) - 1 - len(diagonals)))
+
+    if not counts:
+        counts = [1]
+        diagonals = []
+
+    return counts, diagonals
+
+
+def mirror_polygon_horizontally(polygon: Sequence[Tuple[float, float]], width: int) -> List[Tuple[float, float]]:
+    """Mirror a polygon across the vertical axis of the page."""
+    mirrored: List[Tuple[float, float]] = []
+    for x, y in polygon:
+        mirrored.append((width - x, y))
+    return mirrored
+
+
+def build_panel_image(
+    panel_width: int,
+    panel_height: int,
+    panel_color: tuple[int, int, int],
+    outline_color: tuple[int, int, int],
+    background_color: tuple[int, int, int],
+    border_thickness: int,
+    outline_thickness: int,
+    images: List[Image.Image],
+    image_index: int,
+) -> tuple[Image.Image, int]:
+    """Create a rectangular panel image with the configured styling."""
+    panel = Image.new("RGB", (panel_width, panel_height), panel_color)
+    if 0 <= image_index < len(images):
+        img = crop_and_resize_image(images[image_index], panel_width, panel_height)
+        panel.paste(img, (0, 0))
+
+    if outline_thickness > 0:
+        panel = ImageOps.expand(panel, border=outline_thickness, fill=outline_color)
+    if border_thickness > 0:
+        panel = ImageOps.expand(panel, border=border_thickness, fill=background_color)
+
+    return panel, image_index + 1
+
+
+def paste_panel_polygon(
+    page: Image.Image,
+    panel_image: Image.Image,
+    polygon: Sequence[Tuple[float, float]],
+    bounds: tuple[int, int, int, int],
+) -> None:
+    """Paste a panel image onto the page using a polygon mask."""
+    min_x, min_y, max_x, max_y = bounds
+    width = max(max_x - min_x, 1)
+    height = max(max_y - min_y, 1)
+
+    if panel_image.size != (width, height):
+        panel_image = panel_image.resize((width, height), Image.Resampling.LANCZOS)
+
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    relative = [(x - min_x, y - min_y) for x, y in polygon]
+    draw.polygon(relative, fill=255)
+
+    page.paste(panel_image, (min_x, min_y), mask)
+
+
+def draw_polygon_borders(
+    page: Image.Image,
+    polygon: Sequence[Tuple[float, float]],
+    border_thickness: int,
+    outline_thickness: int,
+    background_color: tuple[int, int, int],
+    outline_color: tuple[int, int, int],
+) -> None:
+    """Render border and outline strokes around a polygon."""
+    if border_thickness <= 0 and outline_thickness <= 0:
+        return
+
+    draw = ImageDraw.Draw(page)
+    closed = list(polygon) + [polygon[0]]
+
+    if border_thickness > 0:
+        draw.line(closed, fill=background_color, width=max(border_thickness, 1))
+    if outline_thickness > 0:
+        draw.line(closed, fill=outline_color, width=max(outline_thickness, 1))
+
+
+def polygon_bounds(polygon: Sequence[Tuple[float, float]]) -> tuple[int, int, int, int]:
+    """Compute integer bounds for a polygon."""
+    xs = [point[0] for point in polygon]
+    ys = [point[1] for point in polygon]
+    min_x = int(np.floor(min(xs)))
+    min_y = int(np.floor(min(ys)))
+    max_x = int(np.ceil(max(xs)))
+    max_y = int(np.ceil(max(ys)))
+    return min_x, min_y, max_x, max_y
 
 
 def create_and_paste_panel(
@@ -203,83 +348,195 @@ class CR_ComicPanelTemplates:
         total_images = len(pil_images)
         draw = ImageDraw.Draw(page)
 
-        if first_char == "G":
-            rows = safe_digit(template[1], default=1)
-            columns = safe_digit(template[2], default=1)
-            panel_width = compute_panel_span(page.width, columns, border_thickness, outline_thickness)
-            panel_height = compute_panel_span(page.height, rows, border_thickness, outline_thickness)
-            for row in range(rows):
-                for column in range(columns):
-                    create_and_paste_panel(
-                        page,
-                        border_thickness,
-                        outline_thickness,
-                        panel_width,
-                        panel_height,
-                        page.width,
-                        panel_rgb,
-                        background_rgb,
-                        outline_rgb,
-                        pil_images,
-                        row,
-                        column,
-                        image_index,
-                        total_images,
-                        reading_direction,
-                    )
-                    image_index += 1
-        elif first_char == "H":
-            rows = max(len(template) - 1, 1)
-            panel_height = compute_panel_span(page.height, rows, border_thickness, outline_thickness)
-            for row in range(rows):
-                columns = safe_digit(template[row + 1], default=1)
+        use_diagonal = "/" in template
+
+        if not use_diagonal:
+            if first_char == "G":
+                rows = safe_digit(template[1], default=1)
+                columns = safe_digit(template[2], default=1)
                 panel_width = compute_panel_span(page.width, columns, border_thickness, outline_thickness)
-                for column in range(columns):
-                    create_and_paste_panel(
-                        page,
-                        border_thickness,
-                        outline_thickness,
-                        panel_width,
-                        panel_height,
-                        page.width,
-                        panel_rgb,
-                        background_rgb,
-                        outline_rgb,
-                        pil_images,
-                        row,
-                        column,
-                        image_index,
-                        total_images,
-                        reading_direction,
-                    )
-                    image_index += 1
-        elif first_char == "V":
-            columns = max(len(template) - 1, 1)
-            panel_width = compute_panel_span(page.width, columns, border_thickness, outline_thickness)
-            for column in range(columns):
-                rows = safe_digit(template[column + 1], default=1)
                 panel_height = compute_panel_span(page.height, rows, border_thickness, outline_thickness)
                 for row in range(rows):
-                    create_and_paste_panel(
-                        page,
-                        border_thickness,
-                        outline_thickness,
-                        panel_width,
-                        panel_height,
-                        page.width,
-                        panel_rgb,
-                        background_rgb,
-                        outline_rgb,
-                        pil_images,
-                        row,
-                        column,
-                        image_index,
-                        total_images,
-                        reading_direction,
-                    )
-                    image_index += 1
+                    for column in range(columns):
+                        create_and_paste_panel(
+                            page,
+                            border_thickness,
+                            outline_thickness,
+                            panel_width,
+                            panel_height,
+                            page.width,
+                            panel_rgb,
+                            background_rgb,
+                            outline_rgb,
+                            pil_images,
+                            row,
+                            column,
+                            image_index,
+                            total_images,
+                            reading_direction,
+                        )
+                        image_index += 1
+            elif first_char == "H":
+                rows = max(len(template) - 1, 1)
+                panel_height = compute_panel_span(page.height, rows, border_thickness, outline_thickness)
+                for row in range(rows):
+                    columns = safe_digit(template[row + 1], default=1)
+                    panel_width = compute_panel_span(page.width, columns, border_thickness, outline_thickness)
+                    for column in range(columns):
+                        create_and_paste_panel(
+                            page,
+                            border_thickness,
+                            outline_thickness,
+                            panel_width,
+                            panel_height,
+                            page.width,
+                            panel_rgb,
+                            background_rgb,
+                            outline_rgb,
+                            pil_images,
+                            row,
+                            column,
+                            image_index,
+                            total_images,
+                            reading_direction,
+                        )
+                        image_index += 1
+            elif first_char == "V":
+                columns = max(len(template) - 1, 1)
+                panel_width = compute_panel_span(page.width, columns, border_thickness, outline_thickness)
+                for column in range(columns):
+                    rows = safe_digit(template[column + 1], default=1)
+                    panel_height = compute_panel_span(page.height, rows, border_thickness, outline_thickness)
+                    for row in range(rows):
+                        create_and_paste_panel(
+                            page,
+                            border_thickness,
+                            outline_thickness,
+                            panel_width,
+                            panel_height,
+                            page.width,
+                            panel_rgb,
+                            background_rgb,
+                            outline_rgb,
+                            pil_images,
+                            row,
+                            column,
+                            image_index,
+                            total_images,
+                            reading_direction,
+                        )
+                        image_index += 1
+            else:
+                draw.text((10, 10), "Unknown template", fill=(255, 0, 0))
         else:
-            draw.text((10, 10), "Unknown template", fill=(255, 0, 0))
+            panels: List[PanelShape] = []
+            diag_offset_ratio = 0.2
+
+            if first_char == "H":
+                row_counts, row_diagonals = parse_layout_sequence(template[1:])
+                margin = border_thickness + outline_thickness
+                panel_height = compute_panel_span(page.height, len(row_counts), border_thickness, outline_thickness)
+                cell_height = panel_height + 2 * margin
+                offset_y = page.height * diag_offset_ratio
+
+                top_left = 0.0
+                top_right = 0.0
+                for index, count in enumerate(row_counts):
+                    panel_width = compute_panel_span(page.width, count, border_thickness, outline_thickness)
+                    cell_width = panel_width + 2 * margin
+
+                    bottom_left = clamp(top_left + cell_height, 0.0, float(page.height))
+                    bottom_right = clamp(top_right + cell_height, 0.0, float(page.height))
+                    diagonal_below = row_diagonals[index] if index < len(row_diagonals) else False
+                    if diagonal_below:
+                        bottom_right = clamp(bottom_right + offset_y, 0.0, float(page.height))
+
+                    x_position = 0.0
+                    for column in range(count):
+                        left = clamp(x_position, 0.0, float(page.width))
+                        right = clamp(left + cell_width, 0.0, float(page.width))
+                        top_left_y = clamp(interpolate(top_left, top_right, left, page.width), 0.0, float(page.height))
+                        top_right_y = clamp(interpolate(top_left, top_right, right, page.width), 0.0, float(page.height))
+                        bottom_left_y = clamp(interpolate(bottom_left, bottom_right, left, page.width), 0.0, float(page.height))
+                        bottom_right_y = clamp(interpolate(bottom_left, bottom_right, right, page.width), 0.0, float(page.height))
+                        panels.append(
+                            PanelShape(
+                                polygon=[
+                                    (left, top_left_y),
+                                    (right, top_right_y),
+                                    (right, bottom_right_y),
+                                    (left, bottom_left_y),
+                                ]
+                            )
+                        )
+                        x_position = right
+
+                    top_left = bottom_left
+                    top_right = bottom_right
+            elif first_char == "V":
+                column_counts, column_diagonals = parse_layout_sequence(template[1:])
+                margin = border_thickness + outline_thickness
+                panel_width = compute_panel_span(page.width, len(column_counts), border_thickness, outline_thickness)
+                cell_width = panel_width + 2 * margin
+                offset_x = page.width * diag_offset_ratio
+
+                left_top = 0.0
+                left_bottom = 0.0
+                for index, count in enumerate(column_counts):
+                    panel_height = compute_panel_span(page.height, count, border_thickness, outline_thickness)
+                    cell_height = panel_height + 2 * margin
+                    right_top = clamp(left_top + cell_width, 0.0, float(page.width))
+                    right_bottom = clamp(left_bottom + cell_width, 0.0, float(page.width))
+
+                    diagonal_below = column_diagonals[index] if index < len(column_diagonals) else False
+                    if diagonal_below:
+                        right_bottom = clamp(right_bottom + offset_x, 0.0, float(page.width))
+
+                    y_position = 0.0
+                    for row in range(count):
+                        top = clamp(y_position, 0.0, float(page.height))
+                        bottom = clamp(top + cell_height, 0.0, float(page.height))
+                        left_top_x = clamp(interpolate(left_top, left_bottom, top, page.height), 0.0, float(page.width))
+                        left_bottom_x = clamp(interpolate(left_top, left_bottom, bottom, page.height), 0.0, float(page.width))
+                        right_top_x = clamp(interpolate(right_top, right_bottom, top, page.height), 0.0, float(page.width))
+                        right_bottom_x = clamp(interpolate(right_top, right_bottom, bottom, page.height), 0.0, float(page.width))
+                        panels.append(
+                            PanelShape(
+                                polygon=[
+                                    (left_top_x, top),
+                                    (right_top_x, top),
+                                    (right_bottom_x, bottom),
+                                    (left_bottom_x, bottom),
+                                ]
+                            )
+                        )
+                        y_position = bottom
+
+                    left_top = right_top
+                    left_bottom = right_bottom
+            else:
+                draw.text((10, 10), "Unknown template", fill=(255, 0, 0))
+
+            if reading_direction == "right to left":
+                panels = [PanelShape(polygon=mirror_polygon_horizontally(panel.polygon, page.width)) for panel in panels]
+
+            for panel in panels:
+                min_x, min_y, max_x, max_y = polygon_bounds(panel.polygon)
+                width = max(max_x - min_x, 1)
+                height = max(max_y - min_y, 1)
+                panel_image, image_index = build_panel_image(
+                    width,
+                    height,
+                    panel_rgb,
+                    outline_rgb,
+                    background_rgb,
+                    border_thickness,
+                    outline_thickness,
+                    pil_images,
+                    image_index,
+                )
+                paste_panel_polygon(page, panel_image, panel.polygon, (min_x, min_y, max_x, max_y))
+                draw_polygon_borders(page, panel.polygon, border_thickness, outline_thickness, background_rgb, outline_rgb)
 
         if border_thickness > 0:
             page = ImageOps.expand(page, border_thickness, background_rgb)

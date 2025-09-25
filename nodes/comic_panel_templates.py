@@ -104,22 +104,23 @@ def parse_layout_sequence(sequence: str) -> tuple[List[int], List[bool]]:
     """Parse a sequence string (e.g. "1/23") into counts and diagonal flags."""
     counts: List[int] = []
     diagonals: List[bool] = []
-    previous_was_digit = False
+    diagonal_pending = False
 
     for char in sequence:
         if char.isdigit():
             counts.append(safe_int(char))
+
             if len(counts) > 1 and len(diagonals) < len(counts) - 1:
-                diagonals.append(False)
-            previous_was_digit = True
-        elif char == "/" and previous_was_digit and counts:
-            index = len(counts) - 1
-            if len(diagonals) < index:
-                diagonals.extend([False] * (index - len(diagonals)))
-            diagonals[index - 1] = True
-            previous_was_digit = False
+                diagonals.extend([False] * (len(counts) - 1 - len(diagonals)))
+
+            if diagonal_pending and len(counts) >= 2:
+                diagonals[len(counts) - 2] = True
+                diagonal_pending = False
+        elif char == "/":
+            if counts:
+                diagonal_pending = True
         else:
-            previous_was_digit = False
+            diagonal_pending = False
 
     if counts and len(diagonals) < len(counts) - 1:
         diagonals.extend([False] * (len(counts) - 1 - len(diagonals)))

@@ -519,11 +519,12 @@ class CR_ComicPanelTemplates:
 
             if first_char == "H":
                 if use_enhanced:
-                    row_counts, row_diagonals = parse_enhanced_layout_sequence(template[1:])
+                    row_counts, row_diagonals, row_verticals = parse_enhanced_layout_sequence(template[1:])
                 else:
                     row_counts, old_diagonals = parse_layout_sequence(template[1:])
                     # Convert old format to new format
                     row_diagonals = [DiagonalInfo(horizontal=diag) for diag in old_diagonals]
+                    row_verticals = [DiagonalInfo() for _ in row_counts]
                 
                 margin = border_thickness + outline_thickness
                 panel_height = compute_panel_span(page.height, len(row_counts), border_thickness, outline_thickness)
@@ -540,6 +541,7 @@ class CR_ComicPanelTemplates:
                     bottom_right = clamp(top_right + cell_height, 0.0, float(page.height))
                     
                     diagonal_info = row_diagonals[index] if index < len(row_diagonals) else DiagonalInfo()
+                    vertical_info = row_verticals[index] if index < len(row_verticals) else DiagonalInfo()
                     
                     # Apply horizontal diagonal
                     if diagonal_info.horizontal:
@@ -558,8 +560,8 @@ class CR_ComicPanelTemplates:
                         bottom_right_y = clamp(interpolate(bottom_left, bottom_right, right, page.width), 0.0, float(page.height))
                         
                         # Apply vertical diagonal within this row
-                        if diagonal_info.vertical and column < count - 1:
-                            offset_x = page.width * diagonal_info.angle
+                        if vertical_info.vertical and column < count - 1:
+                            offset_x = page.width * vertical_info.angle
                             # Modify the right edge for vertical diagonal effect
                             top_right_y = clamp(top_right_y - offset_x, 0.0, float(page.height))
                             bottom_right_y = clamp(bottom_right_y + offset_x, 0.0, float(page.height))
@@ -582,10 +584,11 @@ class CR_ComicPanelTemplates:
             elif first_char == "V":
                 # Similar logic for vertical layouts with enhanced diagonals
                 if use_enhanced:
-                    column_counts, column_diagonals = parse_enhanced_layout_sequence(template[1:])
+                    column_counts, column_diagonals, _column_verticals = parse_enhanced_layout_sequence(template[1:])
                 else:
                     column_counts, old_diagonals = parse_layout_sequence(template[1:])
                     column_diagonals = [DiagonalInfo(horizontal=diag) for diag in old_diagonals]
+                    _column_verticals = [DiagonalInfo() for _ in column_counts]
                 
                 margin = border_thickness + outline_thickness
                 panel_width = compute_panel_span(page.width, len(column_counts), border_thickness, outline_thickness)

@@ -1,0 +1,9 @@
+git status
+git add .
+git commit -m "Update: cambios recientes"
+git push origin main
+
+
+or 
+
+git add . && git commit -m "Update: cambios recientes" && git push origin main

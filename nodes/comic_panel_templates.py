@@ -285,43 +285,44 @@ def draw_polygon_borders(
     outline_thickness: int,
     outline_color: tuple[int, int, int],
 ) -> None:
-    """Render outline strokes without doubling shared edges."""
+    """Render outline strokes with uniform thickness, avoiding doubled shared edges."""
     if outline_thickness <= 0 or not polygons:
         return
 
-    def quantize_point(point: Tuple[float, float], scale: int = 1000) -> tuple[int, int]:
-        return int(round(point[0] * scale)), int(round(point[1] * scale))
-
-    unique_edges: dict[tuple[tuple[int, int], tuple[int, int]], tuple[Tuple[float, float], Tuple[float, float]]] = {}
+    # Collect all edges with their frequency to avoid doubling shared edges
+    edge_count: dict[tuple[Tuple[int, int], Tuple[int, int]], int] = {}
 
     for polygon in polygons:
         if not polygon:
             continue
         for index in range(len(polygon)):
-            start = polygon[index]
-            end = polygon[(index + 1) % len(polygon)]
-            start_key = quantize_point(start)
-            end_key = quantize_point(end)
-            if start_key <= end_key:
-                edge_key = (start_key, end_key)
-            else:
-                edge_key = (end_key, start_key)
-            unique_edges.setdefault(edge_key, (start, end))
+            start_point = polygon[index]
+            end_point = polygon[(index + 1) % len(polygon)]
+            start_pixel = (int(round(start_point[0])), int(
+                round(start_point[1])))
+            end_pixel = (int(round(end_point[0])), int(round(end_point[1])))
 
-    if not unique_edges:
+            if start_pixel == end_pixel:
+                continue
+
+            # Normalize edge direction for consistent counting
+            if start_pixel <= end_pixel:
+                edge = (start_pixel, end_pixel)
+            else:
+                edge = (end_pixel, start_pixel)
+
+            edge_count[edge] = edge_count.get(edge, 0) + 1
+
+    if not edge_count:
         return
 
+    # Draw each unique edge only once with uniform thickness
     draw = ImageDraw.Draw(page)
     width = max(outline_thickness, 1)
-    for start, end in unique_edges.values():
-        draw.line(
-            [
-                (int(round(start[0])), int(round(start[1]))),
-                (int(round(end[0])), int(round(end[1]))),
-            ],
-            fill=outline_color,
-            width=width,
-        )
+
+    for edge in edge_count.keys():
+        start_pixel, end_pixel = edge
+        draw.line([start_pixel, end_pixel], fill=outline_color, width=width)
 
 
 def polygon_bounds(polygon: Sequence[Tuple[float, float]]) -> tuple[int, int, int, int]:
@@ -600,21 +601,14 @@ class CR_ComicPanelTemplates:
                             bottom_right + adjusted_offset, 0.0, float(content_height))
 
                     # Calculate column boundaries
-                    base_boundaries: List[float] = []
-                    current_x = 0.0
-                    for col in range(count + 1):
-                        if col == 0:
-                            base_boundaries.append(0.0)
-                        elif col == count:
-                            base_boundaries.append(float(content_width))
-                        else:
-                            current_x += panel_width
-                            base_boundaries.append(current_x)
-                            if col < count:
-                                current_x += internal_padding_value
+                    total_panel_width = panel_width * count
+                    base_boundaries: List[float] = [
+                        panel_width * boundary_index for boundary_index in range(count + 1)
+                    ]
 
                     top_boundaries = base_boundaries.copy()
                     bottom_boundaries = base_boundaries.copy()
+                    max_base_coordinate = max(total_panel_width, 0.0)
 
                     # Apply vertical diagonal offsets
                     if vertical_info.vertical and count > 1:
@@ -622,19 +616,36 @@ class CR_ComicPanelTemplates:
                         for boundary_index in range(1, len(base_boundaries) - 1):
                             top_boundaries[boundary_index] = clamp(
                                 base_boundaries[boundary_index] - offset/2,
-                                0.0, float(content_width)
+                                0.0, max_base_coordinate
                             )
                             bottom_boundaries[boundary_index] = clamp(
                                 base_boundaries[boundary_index] + offset/2,
-                                0.0, float(content_width)
+                                0.0, max_base_coordinate
                             )
 
                     # Create panels for this row
                     for col in range(count):
-                        left_top_x = top_boundaries[col]
-                        right_top_x = top_boundaries[col + 1]
-                        left_bottom_x = bottom_boundaries[col]
-                        right_bottom_x = bottom_boundaries[col + 1]
+                        padding_offset = internal_padding_value * col
+                        left_top_x = clamp(
+                            top_boundaries[col] + padding_offset,
+                            0.0,
+                            float(content_width),
+                        )
+                        right_top_x = clamp(
+                            top_boundaries[col + 1] + padding_offset,
+                            0.0,
+                            float(content_width),
+                        )
+                        left_bottom_x = clamp(
+                            bottom_boundaries[col] + padding_offset,
+                            0.0,
+                            float(content_width),
+                        )
+                        right_bottom_x = clamp(
+                            bottom_boundaries[col + 1] + padding_offset,
+                            0.0,
+                            float(content_width),
+                        )
 
                         top_left_y = interpolate(
                             top_left, top_right, left_top_x, content_width)
@@ -651,7 +662,6 @@ class CR_ComicPanelTemplates:
                             (right_bottom_x, bottom_right_y),
                             (left_bottom_x, bottom_left_y),
                         ]))
-
                     # Update for next row
                     if index < len(row_counts) - 1:
                         top_left = bottom_left + internal_padding_value
@@ -681,7 +691,8 @@ class CR_ComicPanelTemplates:
 
             paste_panel_polygon(page, panel_image, panel.polygon, bounds)
 
-        draw_polygon_borders(page, [panel.polygon for panel in panels], outline_thickness, outline_rgb)
+        draw_polygon_borders(
+            page, [panel.polygon for panel in panels], outline_thickness, outline_rgb)
         # Add external padding
         if external_padding > 0:
             page = ImageOps.expand(page, external_padding, background_rgb)

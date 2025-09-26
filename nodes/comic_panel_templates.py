@@ -97,8 +97,9 @@ class PanelShape:
 @dataclass
 class DiagonalInfo:
     """Information about diagonal separators."""
-    horizontal: bool = False  # Diagonal between rows
-    vertical: bool = False    # Diagonal between columns within a row
+    horizontal: bool = False  # Diagonal between rows (H) or between columns (V)
+    # Diagonal within a row (H) or within a column (V)
+    vertical: bool = False
     angle: float = 0.2        # Diagonal offset ratio (0.0 to 1.0)
 
 
@@ -147,22 +148,24 @@ def parse_layout_sequence(sequence: str) -> tuple[List[int], List[bool]]:
     return counts, diagonals
 
 
-def parse_enhanced_layout_sequence(sequence: str) -> tuple[List[int], List[DiagonalInfo], List[DiagonalInfo]]:
+def parse_enhanced_layout_sequence(sequence: str, orientation: str = "horizontal") -> tuple[List[int], List[DiagonalInfo], List[DiagonalInfo]]:
     """
     Parse enhanced sequence string with support for vertical and horizontal diagonals.
 
-    Examples:
-    - "1|2"     -> [1,2], [DiagonalInfo(vertical=True)], []
-    - "1/2"     -> [1,2], [DiagonalInfo(horizontal=True)], []  
-    - "1/2|"    -> [1,2], [DiagonalInfo(horizontal=True)], [DiagonalInfo(vertical=True)]
+    For horizontal layouts (H):
+    - "/" means diagonal between rows
+    - "|" means vertical diagonal within a row (between columns in that row)
+
+    For vertical layouts (V):
+    - "/" means horizontal diagonal within a column (between panels in that column)  
+    - "|" means diagonal between columns
     """
     counts: List[int] = []
-    row_diagonals: List[DiagonalInfo] = []  # Between rows
-    col_diagonals: List[DiagonalInfo] = []  # Within rows (between columns)
+    between_diagonals: List[DiagonalInfo] = []  # Between groups (rows/columns)
+    within_diagonals: List[DiagonalInfo] = []   # Within a group
 
-    # Split by angle specifier first
-    if ':' in sequence:
-        layout_part, angle_part = sequence.rsplit(':', 1)
+    if ":" in sequence:
+        layout_part, angle_part = sequence.rsplit(":", 1)
         try:
             angle_degrees = float(angle_part)
             angle_ratio = min(max(angle_degrees / 90.0, 0.0), 1.0)
@@ -172,10 +175,15 @@ def parse_enhanced_layout_sequence(sequence: str) -> tuple[List[int], List[Diago
         layout_part = sequence
         angle_ratio = 0.2
 
-    # Parse each character
+    # Determine which character means what based on orientation
+    is_vertical = orientation.lower() == "vertical"
+    # Between columns (V) or rows (H)
+    between_char = "|" if is_vertical else "/"
+    within_char = "/" if is_vertical else "|"   # Within column (V) or row (H)
+
+    pending_between = False
+    pending_within = False
     i = 0
-    pending_horizontal = False
-    pending_vertical = False
 
     while i < len(layout_part):
         char = layout_part[i]
@@ -183,41 +191,39 @@ def parse_enhanced_layout_sequence(sequence: str) -> tuple[List[int], List[Diago
         if char.isdigit():
             counts.append(int(char))
 
-            # Apply pending diagonal flags to row transitions
-            if len(counts) > 1 and len(row_diagonals) < len(counts) - 1:
+            # Handle between-group diagonals
+            if len(counts) > 1 and len(between_diagonals) < len(counts) - 1:
                 diag_info = DiagonalInfo(angle=angle_ratio)
-                if pending_horizontal:
+                if pending_between:
                     diag_info.horizontal = True
-                    pending_horizontal = False
-                row_diagonals.append(diag_info)
+                between_diagonals.append(diag_info)
+                pending_between = False
 
-            # Apply vertical diagonal to this specific row
-            if pending_vertical:
-                # Ensure we have col_diagonals for this row index
-                while len(col_diagonals) < len(counts):
-                    col_diagonals.append(DiagonalInfo(angle=angle_ratio))
-                col_diagonals[len(counts) - 1].vertical = True
-                pending_vertical = False
+            # Handle within-group diagonals
+            if pending_within:
+                while len(within_diagonals) < len(counts):
+                    within_diagonals.append(DiagonalInfo(angle=angle_ratio))
+                within_diagonals[len(counts) - 1].vertical = True
+                pending_within = False
 
-        elif char == '/':
-            pending_horizontal = True
-
-        elif char == '|':
-            pending_vertical = True
+        elif char == between_char:
+            pending_between = True
+        elif char == within_char:
+            pending_within = True
 
         i += 1
 
-    # Ensure proper counts
-    while len(row_diagonals) < len(counts) - 1:
-        row_diagonals.append(DiagonalInfo(angle=angle_ratio))
+    # Fill missing diagonal info
+    while len(between_diagonals) < max(len(counts) - 1, 0):
+        between_diagonals.append(DiagonalInfo(angle=angle_ratio))
 
-    while len(col_diagonals) < len(counts):
-        col_diagonals.append(DiagonalInfo(angle=angle_ratio))
+    while len(within_diagonals) < len(counts):
+        within_diagonals.append(DiagonalInfo(angle=angle_ratio))
 
     if not counts:
         counts = [1]
 
-    return counts, row_diagonals, col_diagonals
+    return counts, between_diagonals, within_diagonals
 
 
 def mirror_polygon_horizontally(polygon: Sequence[Tuple[float, float]], width: int) -> List[Tuple[float, float]]:
@@ -285,12 +291,11 @@ def draw_polygon_borders(
     outline_thickness: int,
     outline_color: tuple[int, int, int],
 ) -> None:
-    """Render outline strokes with uniform thickness, avoiding doubled shared edges."""
+    """Render outline strokes with uniform thickness and antialiasing."""
     if outline_thickness <= 0 or not polygons:
         return
 
-    # Collect all edges with their frequency to avoid doubling shared edges
-    edge_count: dict[tuple[Tuple[int, int], Tuple[int, int]], int] = {}
+    edge_lookup: dict[tuple[Tuple[int, int], Tuple[int, int]], tuple[Tuple[float, float], Tuple[float, float]]] = {}
 
     for polygon in polygons:
         if not polygon:
@@ -298,33 +303,39 @@ def draw_polygon_borders(
         for index in range(len(polygon)):
             start_point = polygon[index]
             end_point = polygon[(index + 1) % len(polygon)]
-            start_pixel = (int(round(start_point[0])), int(
-                round(start_point[1])))
+            start_pixel = (int(round(start_point[0])), int(round(start_point[1])))
             end_pixel = (int(round(end_point[0])), int(round(end_point[1])))
-
             if start_pixel == end_pixel:
                 continue
-
-            # Normalize edge direction for consistent counting
             if start_pixel <= end_pixel:
-                edge = (start_pixel, end_pixel)
+                edge_key = (start_pixel, end_pixel)
+                edge_value = (start_point, end_point)
             else:
-                edge = (end_pixel, start_pixel)
+                edge_key = ((end_pixel), (start_pixel))
+                edge_value = (end_point, start_point)
+            edge_lookup.setdefault(edge_key, edge_value)
 
-            edge_count[edge] = edge_count.get(edge, 0) + 1
-
-    if not edge_count:
+    if not edge_lookup:
         return
 
-    # Draw each unique edge only once with uniform thickness
-    draw = ImageDraw.Draw(page)
-    width = max(outline_thickness, 1)
+    scale_factor = 4
+    temp_image = Image.new("RGBA", (page.width * scale_factor, page.height * scale_factor), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(temp_image)
+    scaled_width = max(outline_thickness, 1) * scale_factor
+    rgba_color = tuple(outline_color) + (255,)
 
-    for edge in edge_count.keys():
-        start_pixel, end_pixel = edge
-        draw.line([start_pixel, end_pixel], fill=outline_color, width=width)
+    for start_point, end_point in edge_lookup.values():
+        draw.line(
+            [
+                (start_point[0] * scale_factor, start_point[1] * scale_factor),
+                (end_point[0] * scale_factor, end_point[1] * scale_factor),
+            ],
+            fill=rgba_color,
+            width=scaled_width,
+        )
 
-
+    antialiased = temp_image.resize(page.size, Image.Resampling.LANCZOS)
+    page.paste(antialiased, (0, 0), antialiased)
 def polygon_bounds(polygon: Sequence[Tuple[float, float]]) -> tuple[int, int, int, int]:
     """Compute integer bounds for a polygon."""
     xs = [point[0] for point in polygon]
@@ -353,6 +364,10 @@ class CR_ComicPanelTemplates:
             "H23",
             "H31",
             "H32",
+            "H1|2",
+            "H1/2",
+            "H2|1",
+            "H2/1",
             "V2",
             "V3",
             "V12",
@@ -361,6 +376,11 @@ class CR_ComicPanelTemplates:
             "V23",
             "V31",
             "V32",
+            "V1|2",
+            "V1/2",
+            "V2|1",
+            "V2/1",
+            "V1/|2",
         ]
         directions = ["left to right", "right to left"]
 
@@ -566,7 +586,7 @@ class CR_ComicPanelTemplates:
             if first_char == "H":
                 if use_enhanced:
                     row_counts, row_diagonals, row_verticals = parse_enhanced_layout_sequence(
-                        template[1:])
+                        template[1:], orientation="horizontal")
                 else:
                     row_counts, old_diagonals = parse_layout_sequence(
                         template[1:])
@@ -670,7 +690,124 @@ class CR_ComicPanelTemplates:
                         top_left = bottom_left
                         top_right = bottom_right
 
-            # Similar logic for vertical layouts would go here...
+            elif first_char == "V":
+                if use_enhanced:
+                    column_counts, column_diagonals, column_verticals = parse_enhanced_layout_sequence(
+                        template[1:], orientation="vertical")
+                else:
+                    column_counts, old_diagonals = parse_layout_sequence(
+                        template[1:])
+                    column_diagonals = [DiagonalInfo(
+                        horizontal=diag) for diag in old_diagonals]
+                    column_verticals = [DiagonalInfo() for _ in column_counts]
+
+                panel_width = compute_panel_span(
+                    content_width, len(column_counts), internal_padding_value)
+
+                # Starting positions - vertical equivalent to horizontal's top_left/top_right
+                left_top = 0.0
+                left_bottom = 0.0
+
+                for index, count in enumerate(column_counts):
+                    diagonal_info = column_diagonals[index] if index < len(
+                        column_diagonals) else DiagonalInfo()
+                    vertical_info = column_verticals[index] if index < len(
+                        column_verticals) else DiagonalInfo()
+
+                    # Calculate right positions - equivalent to bottom in horizontal
+                    right_top = clamp(left_top + panel_width,
+                                      0.0, float(content_width))
+                    right_bottom = clamp(
+                        left_bottom + panel_width, 0.0, float(content_width))
+
+                    # Apply diagonal between columns (equivalent to diagonal between rows in H)
+                    if diagonal_info.horizontal:
+                        base_offset = content_width * diagonal_info.angle
+                        adjusted_offset = base_offset + horizontal_offset
+                        right_bottom = clamp(
+                            right_bottom + adjusted_offset, 0.0, float(content_width))
+
+                    panel_height = compute_panel_span(
+                        content_height, count, internal_padding_value)
+
+                    # Calculate row boundaries within this column
+                    base_boundaries: List[float] = [
+                        panel_height * boundary_index for boundary_index in range(count + 1)
+                    ]
+
+                    left_boundaries = base_boundaries.copy()
+                    right_boundaries = base_boundaries.copy()
+                    max_base_coordinate = panel_height * count
+
+                    # Apply horizontal diagonal within column (equivalent to vertical diagonal within row in H)
+                    if vertical_info.vertical and count > 1:
+                        offset = panel_width * vertical_info.angle + height_offset
+                        for boundary_index in range(1, len(base_boundaries) - 1):
+                            left_boundaries[boundary_index] = clamp(
+                                base_boundaries[boundary_index] - offset / 2,
+                                0.0,
+                                max_base_coordinate,
+                            )
+                            right_boundaries[boundary_index] = clamp(
+                                base_boundaries[boundary_index] + offset / 2,
+                                0.0,
+                                max_base_coordinate,
+                            )
+
+                    # Create panels for this column
+                    for row in range(count):
+                        padding_offset = internal_padding_value * row
+                        left_top_y = clamp(
+                            left_boundaries[row] + padding_offset, 0.0, float(content_height))
+                        left_bottom_y = clamp(
+                            left_boundaries[row + 1] + padding_offset, 0.0, float(content_height))
+                        right_top_y = clamp(
+                            right_boundaries[row] + padding_offset, 0.0, float(content_height))
+                        right_bottom_y = clamp(
+                            right_boundaries[row + 1] + padding_offset, 0.0, float(content_height))
+
+                        # Interpolate X coordinates based on diagonal between columns
+                        left_top_x = clamp(
+                            interpolate(left_top, left_bottom,
+                                        left_top_y, content_height),
+                            0.0,
+                            float(content_width),
+                        )
+                        left_bottom_x = clamp(
+                            interpolate(left_top, left_bottom,
+                                        left_bottom_y, content_height),
+                            0.0,
+                            float(content_width),
+                        )
+                        right_top_x = clamp(
+                            interpolate(right_top, right_bottom,
+                                        right_top_y, content_height),
+                            0.0,
+                            float(content_width),
+                        )
+                        right_bottom_x = clamp(
+                            interpolate(right_top, right_bottom,
+                                        right_bottom_y, content_height),
+                            0.0,
+                            float(content_width),
+                        )
+
+                        panels.append(PanelShape(polygon=[
+                            (left_top_x, left_top_y),
+                            (right_top_x, right_top_y),
+                            (right_bottom_x, right_bottom_y),
+                            (left_bottom_x, left_bottom_y),
+                        ]))
+
+                    # Update for next column
+                    if index < len(column_counts) - 1:
+                        left_top = clamp(
+                            right_top + internal_padding_value, 0.0, float(content_width))
+                        left_bottom = clamp(
+                            right_bottom + internal_padding_value, 0.0, float(content_width))
+                    else:
+                        left_top = right_top
+                        left_bottom = right_bottom
 
         # Mirror if right to left
         if reading_direction == "right to left":

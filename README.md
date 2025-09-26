@@ -1,37 +1,86 @@
 # MangaPanelizer
 
-MangaPanelizer is a focused set of custom nodes for ComfyUI that help you design clean manga and comic page layouts. The project currently concentrates on a single, streamlined node: **CR_ComicPanelTemplates**. It offers fast presets, supports both traditional left-to-right and manga-style right-to-left reading directions, and can auto-place your rendered panels inside the layout.
+MangaPanelizer es un paquete de nodos personalizados para ComfyUI enfocado en diseñar páginas de manga y cómic listas para imprimir. El nodo principal **CR_ComicPanelTemplates** genera composiciones limpias a partir de plantillas predefinidas o cadenas personalizadas y puede rellenar los paneles con tus imágenes renderizadas.
 
-## Features
-- Prebuilt grid, horizontal, and vertical panel templates.
-- Optional custom layout strings for fine control over complex pages.
-- Batch image support with automatic cropping to fit each panel.
-- Flexible colour controls for borders, panel fills, and page backgrounds.
+## Características clave
+- Plantillas G/H/V para cuadrículas, filas y columnas con variaciones diagonales (`/`, `|`, `:ángulo`).
+- Controles separados para márgenes externos (`border_thickness`) y separación interna entre paneles (`internal_padding`).
+- Desplazamientos ajustables para diagonales (`division_height_offset`, `division_horizontal_offset`) que permiten mover el punto de encuentro en ambos ejes.
+- Trazos uniformes con antialiasing para bordes y diagonales sin “sierra”.
+- Colores personalizables para contorno, panel y fondo; compatibilidad con lotes de imágenes.
+- Lectura izquierda?derecha o derecha?izquierda con un solo cambio de parámetro.
 
-## Installation
-1. Navigate to your `ComfyUI/custom_nodes` directory.
-2. Clone this repository: `git clone https://github.com/your-user/MangaPanelizer.git`.
-3. Restart ComfyUI. The MangaPanelizer node will appear under **ðŸ§© MangaPanelizer/Templates**.
+## Instalación
+1. Entra en tu carpeta `ComfyUI/custom_nodes`.
+2. Clona el repositorio o copia esta carpeta: `git clone https://github.com/your-user/MangaPanelizer.git`.
+3. Reinicia ComfyUI. Encontrarás el nodo bajo **MangaPanelizer / Templates**.
 
-## Usage
-Add the **CR_ComicPanelTemplates** node to your workflow, choose a preset (or provide a custom layout code), and optionally connect a batch of images. The node returns a ready-to-use page tensor along with a short description string.
+## Nodo disponible
+### CR_ComicPanelTemplates
+Genera una página completa y devuelve:
+- `image`: tensor de imagen listo para ComfyUI.
+- `show_help`: texto con recordatorios rápidos del uso.
 
-### Custom layout strings and diagonal cuts
-Selecting the **custom** template unlocks fine-grained control over the panel arrangement:
+#### Entradas obligatorias
+- `page_width`, `page_height`: tamaño del lienzo interior (sin contar `border_thickness`).
+- `template`: plantilla predefinida (ver lista). El valor `custom` habilita la cadena personalizada.
+- `reading_direction`: `left to right` o `right to left` (invierte horizontalmente la página al final).
+- `border_thickness`: margen exterior que rodea toda la composición.
+- `outline_thickness`: grosor del trazo de paneles.
+- `outline_color`, `panel_color`, `background_color`: paleta predefinida o `custom` + color hex.
+- `custom_panel_layout`: cadena usada cuando `template = custom` (se ignora en otros casos, pero siempre está visible para que puedas editarla rápido).
+- `internal_padding`: separación entre paneles sucesivos.
+- `division_height_offset`: desplaza la unión vertical de diagonales (afecta `H` y columnas dentro de `V`).
+- `division_horizontal_offset`: desplaza la unión horizontal de diagonales (afecta `H` y `V`).
 
-- Start the string with `H` to describe rows (top to bottom) or `V` to describe columns (left to right).
-- Each digit that follows represents how many panels appear in that row or column. For example, `H123` renders one wide panel on the first row, two panels on the second row, and three on the third row.
-- Insert a slash (`/`) between two digits to replace the straight separator with a diagonal cut between those sections. The diagonal leans across the full width (for `H`) or height (for `V`) of the page.
+#### Entradas opcionales
+- `images`: lote de tensores. Cada panel recibe la siguiente imagen disponible; si faltan, se rellenan con el color del panel.
+- `outline_color_hex`, `panel_color_hex`, `bg_color_hex`: valores hex libres cuando `color = custom`.
 
-Examples:
+## Plantillas incluidas
+```
+G22  G33
+H2   H3   H12  H13  H21  H23  H31  H32  H1|2  H1/2  H2|1  H2/1
+V2   V3   V12  V13  V21  V23  V31  V32  V1|2  V1/2  V2|1  V2/1  V1/|2
+```
+`|` y `/` indican versiones diagonales frecuentes. Usa `custom` para combinaciones más complejas.
 
-- `H1/23` &rarr; One panel on top, a diagonal split, then two panels in the middle row and three on the bottom row.
-- `V2/3` &rarr; Two columns on the left, a diagonal divider, and three columns stacked on the right.
+## Sintaxis de cadenas personalizadas
+1. Comienza con `H` (filas de arriba a abajo) o `V` (columnas de izquierda a derecha).
+2. Cada dígito representa cuántos paneles contiene ese bloque.
+3. Usa separadores para diagonales y offsets:
+   - `/` (horizontal):
+     - En plantillas `H`: diagonal entre filas adyacentes (panel inferior se inclina).
+     - En plantillas `V`: diagonal vertical entre columnas adyacentes.
+   - `|` (vertical dentro del bloque):
+     - En `H`: diagonal dentro de una fila, inclinando la línea que separa columnas.
+     - En `V`: diagonal horizontal dentro de una columna, inclinando la separación entre paneles apilados.
+   - `:ángulo`: opcional al final de la cadena para fijar el ángulo de las diagonales (0–90). Por defecto 18° aprox (`0.2`).
 
-You can chain multiple `/` markers in a single layout code to add several diagonal transitions across the page.
+4. Se admiten múltiples diagonales encadenadas: cada `/` o `|` afecta a la transición siguiente.
+
+### Ejemplos
+- `H1|2:30` ? Panel superior completo y dos paneles inferiores separados por una diagonal inclinada 30°.
+- `H2/1` ? Dos filas; diagonal entre la primera y segunda fila.
+- `V1|2` ? Columna izquierda completa y columna derecha con dos paneles separados por una diagonal horizontal.
+- `V1/2` ? Columna izquierda completa y diagonal vertical hacia una columna con dos paneles rectos.
+- `V2/|2` ? Dos columnas a la izquierda, diagonal vertical hacia una columna derecha con dos paneles y diagonal horizontal interna.
+
+## Consejos de uso
+- **Separaciones**: `internal_padding` añade espacio entre paneles; `border_thickness` envuelve el lienzo final.
+- **Ajustes de diagonales**: combina `division_height_offset` y `division_horizontal_offset` para mover el punto de encuentro de las líneas. Valores positivos empujan hacia abajo/derecha, negativos hacia arriba/izquierda.
+- **Antialiasing**: los bordes se trazan en alta resolución y se reducen, evitando “sierra” incluso con diagonales gruesas.
+- **Lectura oriental**: selecciona `right to left` para espejar toda la página sin cambiar la cadena de layout.
+- **Relleno de imágenes**: conecta una lista de tensores (por ejemplo, con `LoadImage` + `ImageBatch`). El nodo recorta cada imagen al aspecto del panel antes de pegarla.
+
+## Salidas
+- **image**: página final como tensor ComfyUI (RGB).
+- **show_help**: descripción corta con recordatorios de comandos.
 
 ## Roadmap
-We trimmed the original project down to this single node so we can focus on making it exceptional. Expect refinements to template options, smarter automatic placement, and better tooling for mangaka-style pages.
+- Herramientas opcionales para numeración de paneles y texto auxiliar.
+- Layouts compatibles con márgenes interiores asimétricos.
+- Exportadores directos a PDF/PNG en lote.
 
 ---
-MangaPanelizer is based on the foundations laid by the original Comfyroll Studio project. We thank the previous maintainers for their work and plan to expand in our own direction from here.
+Basado en el trabajo previo de Comfyroll Studio. Agradecemos la base original y seguimos expandiendo la herramienta con la comunidad.

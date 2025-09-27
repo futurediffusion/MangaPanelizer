@@ -1,6 +1,6 @@
 """Node registration for MangaPanelizer."""
 
-from .nodes.comic_panel_templates import CR_ComicPanelTemplates
+from .node_templates import CR_ComicPanelTemplates
 
 NODE_CLASS_MAPPINGS = {
     "CR_ComicPanelTemplates": CR_ComicPanelTemplates,

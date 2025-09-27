@@ -27,7 +27,7 @@ Genera una página completa y devuelve:
 - `reading_direction`: `left to right` o `right to left` (invierte horizontalmente la página al final).
 - `border_thickness`: margen exterior que rodea toda la composición.
 - `outline_thickness`: grosor del trazo de paneles.
-- `outline_color`, `panel_color`, `background_color`: paleta predefinida o `custom` + color hex.
+- `outline_color`, `panel_color`, `background_color`: paleta predefinida compartida.
 - `custom_panel_layout`: cadena usada cuando `template = custom` (se ignora en otros casos, pero siempre está visible para que puedas editarla rápido).
 - `internal_padding`: separación entre paneles sucesivos.
 - `division_height_offset`: desplaza la unión vertical de diagonales (afecta `H` y columnas dentro de `V`).
@@ -35,7 +35,6 @@ Genera una página completa y devuelve:
 
 #### Entradas opcionales
 - `images`: lote de tensores. Cada panel recibe la siguiente imagen disponible; si faltan, se rellenan con el color del panel.
-- `outline_color_hex`, `panel_color_hex`, `bg_color_hex`: valores hex libres cuando `color = custom`.
 
 ## Plantillas incluidas
 ```
@@ -84,3 +83,5 @@ V2   V3   V12  V13  V21  V23  V31  V32  V1|2  V1/2  V2|1  V2/1  V1/|2
 
 ---
 Basado en el trabajo previo de Comfyroll Studio. Agradecemos la base original y seguimos expandiendo la herramienta con la comunidad.
+
+

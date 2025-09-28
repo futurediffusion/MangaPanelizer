@@ -75,7 +75,7 @@ class CR_ComicPanelTemplates:
                 "internal_padding": ("INT", {"default": 0, "min": 0, "max": 1024}),
                 "first_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_angle_adjust"}),
                 "second_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_slant_offset"}),
-                "division_position": ("INT", {"default": 0, "min": -30, "max": 30, "label": "Division Position"}),
+                "division_position": ("INT", {"default": 0, "min": -100, "max": 100, "label": "Division Position"}),
             },
             "optional": {
                 "images": ("IMAGE",),
@@ -120,6 +120,20 @@ class CR_ComicPanelTemplates:
         angle_adjust_value = float(first_division_angle if first_division_angle is not None else 0)
         angle_ratio = max(min(angle_adjust_value / 30.0, 1.0), -1.0)
         division_offset_value = float(division_position if division_position is not None else 0)
+        division_offset_ratio = max(min(division_offset_value / 100.0, 1.0), -1.0)
+
+        def adjust_division_line(base_value: float, min_value: float, max_value: float) -> float:
+            """Adjust a division line toward its limits based on the slider ratio."""
+
+            bounded_min = min(min_value, max_value)
+            bounded_max = max(bounded_min, max_value)
+            if bounded_max <= bounded_min:
+                return clamp(base_value, bounded_min, bounded_max)
+
+            base = clamp(base_value, bounded_min, bounded_max)
+            if division_offset_ratio >= 0.0:
+                return base + (bounded_max - base) * division_offset_ratio
+            return base + (base - bounded_min) * division_offset_ratio
 
         content_width = max(page_width - (2 * external_padding), 1)
         content_height = max(page_height - (2 * external_padding), 1)
@@ -181,7 +195,16 @@ class CR_ComicPanelTemplates:
             elif first_char == "H":
                 rows = max(len(template) - 1, 1)
                 panel_height = compute_panel_span(content_height, rows, internal_padding_value)
-                apply_division_offset = division_offset_value if rows == 2 else 0.0
+                two_row_divider: Optional[float] = None
+                if rows == 2:
+                    min_divider = clamp(1.0, 0.0, float(content_height))
+                    max_divider = clamp(
+                        float(content_height) - internal_padding_value - 1.0,
+                        min_divider,
+                        float(content_height),
+                    )
+                    base_divider = clamp(panel_height, min_divider, max_divider)
+                    two_row_divider = adjust_division_line(base_divider, min_divider, max_divider)
 
                 current_y = 0.0
                 for row in range(rows):
@@ -190,10 +213,15 @@ class CR_ComicPanelTemplates:
 
                     current_x = 0.0
                     top = current_y
-                    bottom = top + panel_height
-                    if apply_division_offset and row < rows - 1:
-                        min_bottom = clamp(top + 1.0, 0.0, float(content_height))
-                        bottom = clamp(bottom + apply_division_offset, min_bottom, float(content_height))
+                    if rows == 2:
+                        if row == 0:
+                            bottom = two_row_divider if two_row_divider is not None else top + panel_height
+                        else:
+                            bottom = float(content_height)
+                    else:
+                        bottom = top + panel_height
+                    min_bottom = clamp(top + 1.0, 0.0, float(content_height))
+                    bottom = clamp(bottom, min_bottom, float(content_height))
                     current_height = max(bottom - top, 1.0)
 
                     for col in range(columns):
@@ -218,7 +246,16 @@ class CR_ComicPanelTemplates:
             elif first_char == "V":
                 columns = max(len(template) - 1, 1)
                 panel_width = compute_panel_span(content_width, columns, internal_padding_value)
-                apply_division_offset = division_offset_value if columns == 2 else 0.0
+                two_column_divider: Optional[float] = None
+                if columns == 2:
+                    min_divider = clamp(1.0, 0.0, float(content_width))
+                    max_divider = clamp(
+                        float(content_width) - internal_padding_value - 1.0,
+                        min_divider,
+                        float(content_width),
+                    )
+                    base_divider = clamp(panel_width, min_divider, max_divider)
+                    two_column_divider = adjust_division_line(base_divider, min_divider, max_divider)
 
                 current_x = 0.0
                 for col in range(columns):
@@ -227,10 +264,15 @@ class CR_ComicPanelTemplates:
 
                     current_y = 0.0
                     left = current_x
-                    right = left + panel_width
-                    if apply_division_offset and col < columns - 1:
-                        min_right = clamp(left + 1.0, 0.0, float(content_width))
-                        right = clamp(right + apply_division_offset, min_right, float(content_width))
+                    if columns == 2:
+                        if col == 0:
+                            right = two_column_divider if two_column_divider is not None else left + panel_width
+                        else:
+                            right = float(content_width)
+                    else:
+                        right = left + panel_width
+                    min_right = clamp(left + 1.0, 0.0, float(content_width))
+                    right = clamp(right, min_right, float(content_width))
                     current_width = max(right - left, 1.0)
 
                     for row in range(rows):
@@ -284,11 +326,27 @@ class CR_ComicPanelTemplates:
                     else:
                         bottom_right = clamp(top_right + panel_height, 0.0, float(content_content_y := content_height))
 
-                    if len(row_counts) == 2 and index < len(row_counts) - 1:
-                        min_bottom_left = clamp(top_left + 1.0, 0.0, float(content_height))
-                        min_bottom_right = clamp(top_right + 1.0, 0.0, float(content_height))
-                        bottom_left = clamp(bottom_left + division_offset_value, min_bottom_left, float(content_height))
-                        bottom_right = clamp(bottom_right + division_offset_value, min_bottom_right, float(content_height))
+                    if len(row_counts) == 2:
+                        if index < len(row_counts) - 1:
+                            min_bottom_left = clamp(top_left + 1.0, 0.0, float(content_height))
+                            max_bottom_left = clamp(
+                                float(content_height) - internal_padding_value - 1.0,
+                                min_bottom_left,
+                                float(content_height),
+                            )
+                            bottom_left = adjust_division_line(bottom_left, min_bottom_left, max_bottom_left)
+
+                            min_bottom_right = clamp(top_right + 1.0, 0.0, float(content_height))
+                            max_bottom_right = clamp(
+                                float(content_height) - internal_padding_value - 1.0,
+                                min_bottom_right,
+                                float(content_height),
+                            )
+                            bottom_right = adjust_division_line(bottom_right, min_bottom_right, max_bottom_right)
+
+                        else:
+                            bottom_left = float(content_height)
+                            bottom_right = float(content_height)
 
                     total_panel_width = panel_width * count
                     base_boundaries: List[float] = [
@@ -392,11 +450,26 @@ class CR_ComicPanelTemplates:
                     if index >= len(column_counts) - 1:
                         right_bottom = clamp(right_top, 0.0, float(content_width))
 
-                    if len(column_counts) == 2 and index < len(column_counts) - 1:
-                        min_right_top = clamp(left_top + 1.0, 0.0, float(content_width))
-                        min_right_bottom = clamp(left_bottom + 1.0, 0.0, float(content_width))
-                        right_top = clamp(right_top + division_offset_value, min_right_top, float(content_width))
-                        right_bottom = clamp(right_bottom + division_offset_value, min_right_bottom, float(content_width))
+                    if len(column_counts) == 2:
+                        if index < len(column_counts) - 1:
+                            min_right_top = clamp(left_top + 1.0, 0.0, float(content_width))
+                            max_right_top = clamp(
+                                float(content_width) - internal_padding_value - 1.0,
+                                min_right_top,
+                                float(content_width),
+                            )
+                            right_top = adjust_division_line(right_top, min_right_top, max_right_top)
+
+                            min_right_bottom = clamp(left_bottom + 1.0, 0.0, float(content_width))
+                            max_right_bottom = clamp(
+                                float(content_width) - internal_padding_value - 1.0,
+                                min_right_bottom,
+                                float(content_width),
+                            )
+                            right_bottom = adjust_division_line(right_bottom, min_right_bottom, max_right_bottom)
+                        else:
+                            right_top = float(content_width)
+                            right_bottom = float(content_width)
 
                     panel_height = compute_panel_span(content_height, count, internal_padding_value)
                     base_boundaries: List[float] = [

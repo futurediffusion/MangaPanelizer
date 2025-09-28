@@ -76,6 +76,10 @@ class CR_ComicPanelTemplates:
                 "first_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_angle_adjust"}),
                 "second_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_slant_offset"}),
                 "division_position": ("INT", {"default": 0, "min": -100, "max": 100, "label": "Division Position"}),
+                "second_division_position": (
+                    "INT",
+                    {"default": 0, "min": -100, "max": 100, "label": "Secondary Division Position"},
+                ),
             },
             "optional": {
                 "images": ("IMAGE",),
@@ -104,6 +108,7 @@ class CR_ComicPanelTemplates:
         first_division_angle: Optional[int] = None,
         second_division_angle: Optional[int] = None,
         division_position: Optional[int] = None,
+        second_division_position: Optional[int] = None,
     ):
         pil_images: List[Image.Image] = []
         if images is not None:
@@ -121,6 +126,8 @@ class CR_ComicPanelTemplates:
         angle_ratio = max(min(angle_adjust_value / 30.0, 1.0), -1.0)
         division_offset_value = float(division_position if division_position is not None else 0)
         division_offset_ratio = max(min(division_offset_value / 100.0, 1.0), -1.0)
+        secondary_division_value = float(second_division_position if second_division_position is not None else 0)
+        secondary_division_ratio = max(min(secondary_division_value / 100.0, 1.0), -1.0)
 
         def adjust_division_line(base_value: float, min_value: float, max_value: float) -> float:
             """Adjust a division line toward its limits based on the slider ratio."""
@@ -386,6 +393,20 @@ class CR_ComicPanelTemplates:
                                     max_base_coordinate,
                                 )
 
+                    if count == 2 and len(top_boundaries) >= 3:
+                        def shift_interior_boundary(boundaries: List[float]) -> None:
+                            min_limit = clamp(boundaries[0] + 1.0, boundaries[0], boundaries[-1])
+                            max_limit = clamp(boundaries[-1] - 1.0, min_limit, boundaries[-1])
+                            base_value = clamp(boundaries[1], min_limit, max_limit)
+                            if secondary_division_ratio >= 0.0:
+                                adjusted = base_value + (max_limit - base_value) * secondary_division_ratio
+                            else:
+                                adjusted = base_value + (base_value - min_limit) * secondary_division_ratio
+                            boundaries[1] = clamp(adjusted, min_limit, max_limit)
+
+                        shift_interior_boundary(top_boundaries)
+                        shift_interior_boundary(bottom_boundaries)
+
                     for col in range(count):
                         padding_offset = internal_padding_value * col
                         left_top_x = clamp(top_boundaries[col] + padding_offset, 0.0, float(content_width))
@@ -509,6 +530,20 @@ class CR_ComicPanelTemplates:
                                     max_base_coordinate,
                                 )
 
+                    if count == 2 and len(left_boundaries) >= 3:
+                        def shift_interior_boundary(boundaries: List[float]) -> None:
+                            min_limit = clamp(boundaries[0] + 1.0, boundaries[0], boundaries[-1])
+                            max_limit = clamp(boundaries[-1] - 1.0, min_limit, boundaries[-1])
+                            base_value = clamp(boundaries[1], min_limit, max_limit)
+                            if secondary_division_ratio >= 0.0:
+                                adjusted = base_value + (max_limit - base_value) * secondary_division_ratio
+                            else:
+                                adjusted = base_value + (base_value - min_limit) * secondary_division_ratio
+                            boundaries[1] = clamp(adjusted, min_limit, max_limit)
+
+                        shift_interior_boundary(left_boundaries)
+                        shift_interior_boundary(right_boundaries)
+
                     for row in range(count):
                         padding_offset = internal_padding_value * row
                         left_top_y = clamp(left_boundaries[row] + padding_offset, 0.0, float(content_height))
@@ -563,6 +598,7 @@ class CR_ComicPanelTemplates:
         show_help = (
             "MangaPanelizer: Create manga panel layouts. Use 'internal_padding' for spacing between panels. "
             "Use 'diagonal_angle_adjust' (first_division_angle) para definir el angulo de las divisiones y 'diagonal_slant_offset' (second_division_angle) para desplazarlas. "
+            "Ajusta 'Division Position' para mover divisiones principales en layouts 2x y 'Secondary Division Position' para desplazar divisiones internas (H12/V12). "
             "Custom layouts support: H123 (horizontal) y V123 (vertical). Aplica ':angle' de forma opcional para establecer un angulo base si lo necesitas."
         )
 

@@ -82,7 +82,7 @@ class CR_ComicPanelTemplates:
                 "background_color": (COLORS,),
                 "custom_panel_layout": ("STRING", {"multiline": True, "default": "H12", "forceInput": True}),
                 "internal_padding": ("INT", {"default": 0, "min": 0, "max": 1024}),
-                "division_height_offset": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_angle_adjust"}),
+                "first_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_angle_adjust"}),
                 "division_horizontal_offset": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_slant_offset"}),
             },
             "optional": {
@@ -109,7 +109,7 @@ class CR_ComicPanelTemplates:
         custom_panel_layout: str,
         images: Optional[Iterable[torch.Tensor]] = None,
         internal_padding: Optional[int] = None,
-        division_height_offset: Optional[int] = None,
+        first_division_angle: Optional[int] = None,
         division_horizontal_offset: Optional[int] = None,
     ):
         pil_images: List[Image.Image] = []
@@ -124,7 +124,7 @@ class CR_ComicPanelTemplates:
         internal_padding_value = max(internal_padding if internal_padding is not None else 0, 0)
 
         horizontal_offset = division_horizontal_offset if division_horizontal_offset is not None else 0
-        angle_adjust_value = float(division_height_offset if division_height_offset is not None else 0)
+        angle_adjust_value = float(first_division_angle if first_division_angle is not None else 0)
 
         content_width = max(page_width - (2 * external_padding), 1)
         content_height = max(page_height - (2 * external_padding), 1)
@@ -493,7 +493,7 @@ class CR_ComicPanelTemplates:
 
         show_help = (
             "MangaPanelizer: Create manga panel layouts. Use 'internal_padding' for spacing between panels. "
-            "Use 'diagonal_angle_adjust' (division_height_offset) para inclinar las diagonales (/) y 'diagonal_slant_offset' para desplazarlas. "
+            "Use 'diagonal_angle_adjust' (first_division_angle) para inclinar las diagonales (/) y 'diagonal_slant_offset' para desplazarlas. "
             "Custom layouts support: H123 (horizontal), V123 (vertical), / for diagonals, * for vertical splits, :angle for custom angles."
         )
 

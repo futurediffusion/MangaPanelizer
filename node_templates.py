@@ -116,6 +116,7 @@ class CR_ComicPanelTemplates:
 
         horizontal_offset = second_division_angle if second_division_angle is not None else 0
         angle_adjust_value = float(first_division_angle if first_division_angle is not None else 0)
+        angle_ratio = max(min(angle_adjust_value / 30.0, 1.0), -1.0)
 
         content_width = max(page_width - (2 * external_padding), 1)
         content_height = max(page_height - (2 * external_padding), 1)
@@ -258,27 +259,17 @@ class CR_ComicPanelTemplates:
                     vertical_info = row_verticals[index] if index < len(row_verticals) else DiagonalInfo()
 
                     bottom_left = clamp(top_left + panel_height, 0.0, float(content_height))
-                    base_bottom_right = clamp(top_right + panel_height, 0.0, float(content_height))
+                    max_bottom = float(content_height) if index >= len(row_counts) - 1 else max(float(content_height) - internal_padding_value, 0.0)
+                    base_bottom_right = clamp(top_right + panel_height, 0.0, max_bottom)
 
                     if diagonal_info.horizontal and index < len(row_counts) - 1:
-                        padding_buffer = float(internal_padding_value)
-                        effective_padding = min(padding_buffer, float(content_height))
-                        base_offset = content_height * diagonal_info.angle
-                        baseline = clamp(base_bottom_right + base_offset, 0.0, float(content_height))
-                        positive_limit = max(baseline, float(content_height) - effective_padding)
-                        if angle_adjust_value > 0:
-                            factor = min(angle_adjust_value, 30.0) / 30.0
-                            bottom_right = baseline + (positive_limit - baseline) * factor
-                            bottom_right = clamp(bottom_right, 0.0, positive_limit)
-                        elif angle_adjust_value < 0:
-                            negative_limit = min(baseline, effective_padding)
-                            factor = max(angle_adjust_value, -30.0) / 30.0
-                            bottom_right = baseline + (baseline - negative_limit) * factor
-                            bottom_right = clamp(bottom_right, negative_limit, float(content_height))
-                        else:
-                            bottom_right = baseline
+                        max_target = max(float(content_height) - internal_padding_value, 0.0)
+                        min_target = 0.0
+                        baseline = clamp(top_right + panel_height, min_target, max_target)
+                        bottom_right = baseline + panel_height * (angle_ratio)
+                        bottom_right = clamp(bottom_right, min_target, max_target)
                     else:
-                        bottom_right = bottom_left if index >= len(row_counts) - 1 else base_bottom_right
+                        bottom_right = clamp(top_right + panel_height, 0.0, float(content_content_y := content_height))
 
                     total_panel_width = panel_width * count
                     base_boundaries: List[float] = [
@@ -338,8 +329,8 @@ class CR_ComicPanelTemplates:
                         ]))
 
                     if index < len(row_counts) - 1:
-                        top_left = bottom_left + internal_padding_value
-                        top_right = bottom_right + internal_padding_value
+                        top_left = clamp(bottom_left + internal_padding_value, 0.0, float(content_height))
+                        top_right = clamp(bottom_right + internal_padding_value, 0.0, float(content_height))
                     else:
                         top_left = bottom_left
                         top_right = bottom_right
@@ -362,25 +353,20 @@ class CR_ComicPanelTemplates:
                     vertical_info = column_verticals[index] if index < len(column_verticals) else DiagonalInfo()
 
                     right_top = clamp(left_top + panel_width, 0.0, float(content_width))
-                    base_right_bottom = clamp(left_bottom + panel_width, 0.0, float(content_width))
+                    max_right = float(content_width) if index >= len(column_counts) - 1 else max(float(content_width) - internal_padding_value, 0.0)
+                    base_right_bottom = clamp(left_bottom + panel_width, 0.0, max_right)
 
                     if diagonal_info.horizontal and index < len(column_counts) - 1:
-                        padding_buffer = float(internal_padding_value)
-                        effective_padding = min(padding_buffer, float(content_width))
-                        base_offset = content_width * diagonal_info.angle
-                        baseline = clamp(base_right_bottom + base_offset, 0.0, float(content_width))
-                        positive_limit = max(baseline, float(content_width) - effective_padding)
-                        if angle_adjust_value > 0:
-                            factor = min(angle_adjust_value, 30.0) / 30.0
-                            right_bottom = baseline + (positive_limit - baseline) * factor
-                            right_bottom = clamp(right_bottom, 0.0, positive_limit)
-                        elif angle_adjust_value < 0:
-                            negative_limit = min(baseline, effective_padding)
-                            factor = max(angle_adjust_value, -30.0) / 30.0
-                            right_bottom = baseline + (baseline - negative_limit) * factor
-                            right_bottom = clamp(right_bottom, negative_limit, float(content_width))
+                        max_target = max(float(content_width) - internal_padding_value, 0.0)
+                        min_target = 0.0
+                        baseline = clamp(base_right_bottom, min_target, max_target)
+                        if angle_ratio > 0:
+                            right_bottom = baseline + (max_target - baseline) * angle_ratio
+                        elif angle_ratio < 0:
+                            right_bottom = baseline + (baseline - min_target) * angle_ratio
                         else:
                             right_bottom = baseline
+                        right_bottom = clamp(right_bottom, min_target, max_target)
                     else:
                         right_bottom = base_right_bottom
 
@@ -446,7 +432,7 @@ class CR_ComicPanelTemplates:
 
                     if index < len(column_counts) - 1:
                         left_top = clamp(right_top + internal_padding_value, 0.0, float(content_width))
-                        left_bottom = clamp(right_bottom + internal_padding_value, 0.0, float(content_width))
+                        left_bottom = clamp(right_bottom + internal_padding_value, 0.0, max(float(content_width) - internal_padding_value, 0.0))
                     else:
                         left_top = right_top
                         left_bottom = right_bottom

@@ -1,7 +1,7 @@
 """MangaPanelizer custom node package."""
 
 """
-@author: MangaPanelizer Team
+@author: future diffusion
 @title: MangaPanelizer
 @nickname: MangaPanelizer
 @description: Focused tools for building manga panel layouts.

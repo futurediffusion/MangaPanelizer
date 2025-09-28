@@ -49,10 +49,6 @@ class CR_ComicPanelTemplates:
             "H23",
             "H31",
             "H32",
-            "H1*2",
-            "H1/2",
-            "H2*1",
-            "H2/1",
             "V2",
             "V3",
             "V12",
@@ -61,11 +57,6 @@ class CR_ComicPanelTemplates:
             "V23",
             "V31",
             "V32",
-            "V1*2",
-            "V1/2",
-            "V2*1",
-            "V2/1",
-            "V1/*2",
         ]
         directions = ["left to right", "right to left"]
 
@@ -136,14 +127,14 @@ class CR_ComicPanelTemplates:
             else:
                 template = "H12"
 
-        template = template.replace("|", "*")
+        template = template.replace("|", "").replace("*", "")
 
         first_char = template[0].upper()
         image_index = 0
         panels: List[PanelShape] = []
 
-        use_enhanced = ("*" in template) or (":" in template)
-        use_diagonal = "/" in template or use_enhanced
+        use_enhanced = first_char in ("H", "V")
+        use_diagonal = use_enhanced
 
         if not use_diagonal:
             if first_char == "G":
@@ -299,36 +290,33 @@ class CR_ComicPanelTemplates:
                     max_base_coordinate = max(total_panel_width, 0.0)
 
                     if count > 1:
-                        base_angle = vertical_info.angle if vertical_info.vertical else 0.2
-                        magnitude = panel_height * base_angle
-                        if magnitude > 0.0 or horizontal_offset != 0:
-                            offset_ratio = max(min(horizontal_offset / 30.0, 1.0), -1.0)
-                            offset = magnitude * offset_ratio * 1.5
-                            max_offset_allowed = max(panel_height - internal_padding_value, 0.0)
-                            if offset != 0.0:
-                                interior_indices = range(1, len(base_boundaries) - 1)
-                                if interior_indices:
-                                    max_offsets = []
-                                    for boundary_index in interior_indices:
-                                        base_position = base_boundaries[boundary_index]
-                                        margin = min(base_position, max_base_coordinate - base_position)
-                                        max_offsets.append(max(0.0, margin * 2.0))
-                                    max_offset_allowed = min(max_offsets) if max_offsets else abs(offset)
-                                else:
-                                    max_offset_allowed = abs(offset)
-                                if max_offset_allowed > 0.0:
-                                    offset = clamp(offset, -max_offset_allowed, max_offset_allowed)
+                        base_span = max(panel_height - internal_padding_value, 0.0)
+                        offset_ratio = max(min(horizontal_offset / 30.0, 1.0), -1.0)
+                        offset = base_span * offset_ratio
+                        if offset != 0.0:
+                            interior_indices = range(1, len(base_boundaries) - 1)
+                            if interior_indices:
+                                max_offsets = []
                                 for boundary_index in interior_indices:
-                                    top_boundaries[boundary_index] = clamp(
-                                        base_boundaries[boundary_index] - offset / 2,
-                                        0.0,
-                                        max_base_coordinate,
-                                    )
-                                    bottom_boundaries[boundary_index] = clamp(
-                                        base_boundaries[boundary_index] + offset / 2,
-                                        0.0,
-                                        max_base_coordinate,
-                                    )
+                                    base_position = base_boundaries[boundary_index]
+                                    margin = min(base_position, max_base_coordinate - base_position)
+                                    max_offsets.append(max(0.0, margin * 2.0))
+                                max_offset_allowed = min(max_offsets) if max_offsets else abs(offset)
+                            else:
+                                max_offset_allowed = abs(offset)
+                            if max_offset_allowed > 0.0:
+                                offset = clamp(offset, -max_offset_allowed, max_offset_allowed)
+                            for boundary_index in interior_indices:
+                                top_boundaries[boundary_index] = clamp(
+                                    base_boundaries[boundary_index] - offset / 2,
+                                    0.0,
+                                    max_base_coordinate,
+                                )
+                                bottom_boundaries[boundary_index] = clamp(
+                                    base_boundaries[boundary_index] + offset / 2,
+                                    0.0,
+                                    max_base_coordinate,
+                                )
 
                     for col in range(count):
                         padding_offset = internal_padding_value * col
@@ -409,36 +397,33 @@ class CR_ComicPanelTemplates:
                     max_base_coordinate = panel_height * count
 
                     if count > 1:
-                        base_angle = vertical_info.angle if vertical_info.vertical else 0.2
-                        magnitude = panel_width * base_angle
-                        if magnitude > 0.0 or horizontal_offset != 0:
-                            offset_ratio = max(min(horizontal_offset / 30.0, 1.0), -1.0)
-                            offset = magnitude * offset_ratio * 1.5
-                            max_offset_allowed = max(panel_width - internal_padding_value, 0.0)
-                            if offset != 0.0:
-                                interior_indices = range(1, len(base_boundaries) - 1)
-                                if interior_indices:
-                                    max_offsets = []
-                                    for boundary_index in interior_indices:
-                                        base_position = base_boundaries[boundary_index]
-                                        margin = min(base_position, max_base_coordinate - base_position)
-                                        max_offsets.append(max(0.0, margin * 2.0))
-                                    max_offset_allowed = min(max_offsets) if max_offsets else abs(offset)
-                                else:
-                                    max_offset_allowed = abs(offset)
-                                if max_offset_allowed > 0.0:
-                                    offset = clamp(offset, -max_offset_allowed, max_offset_allowed)
+                        base_span = max(panel_width - internal_padding_value, 0.0)
+                        offset_ratio = max(min(horizontal_offset / 30.0, 1.0), -1.0)
+                        offset = base_span * offset_ratio
+                        if offset != 0.0:
+                            interior_indices = range(1, len(base_boundaries) - 1)
+                            if interior_indices:
+                                max_offsets = []
                                 for boundary_index in interior_indices:
-                                    left_boundaries[boundary_index] = clamp(
-                                        base_boundaries[boundary_index] - offset / 2,
-                                        0.0,
-                                        max_base_coordinate,
-                                    )
-                                    right_boundaries[boundary_index] = clamp(
-                                        base_boundaries[boundary_index] + offset / 2,
-                                        0.0,
-                                        max_base_coordinate,
-                                    )
+                                    base_position = base_boundaries[boundary_index]
+                                    margin = min(base_position, max_base_coordinate - base_position)
+                                    max_offsets.append(max(0.0, margin * 2.0))
+                                max_offset_allowed = min(max_offsets) if max_offsets else abs(offset)
+                            else:
+                                max_offset_allowed = abs(offset)
+                            if max_offset_allowed > 0.0:
+                                offset = clamp(offset, -max_offset_allowed, max_offset_allowed)
+                            for boundary_index in interior_indices:
+                                left_boundaries[boundary_index] = clamp(
+                                    base_boundaries[boundary_index] - offset / 2,
+                                    0.0,
+                                    max_base_coordinate,
+                                )
+                                right_boundaries[boundary_index] = clamp(
+                                    base_boundaries[boundary_index] + offset / 2,
+                                    0.0,
+                                    max_base_coordinate,
+                                )
 
                     for row in range(count):
                         padding_offset = internal_padding_value * row
@@ -493,8 +478,8 @@ class CR_ComicPanelTemplates:
 
         show_help = (
             "MangaPanelizer: Create manga panel layouts. Use 'internal_padding' for spacing between panels. "
-            "Use 'diagonal_angle_adjust' (first_division_angle) para inclinar las diagonales (/) y 'diagonal_slant_offset' para desplazarlas. "
-            "Custom layouts support: H123 (horizontal), V123 (vertical), / for diagonals, * for vertical splits, :angle for custom angles."
+            "Use 'diagonal_angle_adjust' (first_division_angle) para definir el angulo de las divisiones y 'diagonal_slant_offset' (second_division_angle) para desplazarlas. "
+            "Custom layouts support: H123 (horizontal) y V123 (vertical). Aplica ':angle' de forma opcional para establecer un angulo base si lo necesitas."
         )
 
         return (pil2tensor(page), show_help)

@@ -25,106 +25,44 @@ def safe_int(value: str, default: int = 1) -> int:
 
 
 def parse_layout_sequence(sequence: str) -> Tuple[List[int], List[bool]]:
-    """Parse legacy layout codes (e.g. "1/23") into counts and diagonal flags."""
-    counts: List[int] = []
-    diagonals: List[bool] = []
-    diagonal_pending = False
-
-    for char in sequence:
-        if char.isdigit():
-            counts.append(safe_int(char))
-
-            if len(counts) > 1 and len(diagonals) < len(counts) - 1:
-                diagonals.extend([False] * (len(counts) - 1 - len(diagonals)))
-
-            if diagonal_pending and len(counts) >= 2:
-                diagonals[len(counts) - 2] = True
-                diagonal_pending = False
-        elif char == "/":
-            if counts:
-                diagonal_pending = True
-        else:
-            diagonal_pending = False
-
-    if counts and len(diagonals) < len(counts) - 1:
-        diagonals.extend([False] * (len(counts) - 1 - len(diagonals)))
-
-    if not counts:
-        counts = [1]
-        diagonals = []
-
-    return counts, diagonals
+    """Parse layout codes (e.g. "123") into counts and diagonal flags."""
+    digits = [safe_int(char) for char in sequence if char.isdigit()]
+    if not digits:
+        digits = [1]
+    diagonals = [True] * max(len(digits) - 1, 0)
+    return digits, diagonals
 
 
 def parse_enhanced_layout_sequence(sequence: str, orientation: str = "horizontal") -> Tuple[List[int], List[DiagonalInfo], List[DiagonalInfo]]:
-    """Parse enhanced sequence strings with diagonal flags.
-
-    Parameters
-    ----------
-    sequence:
-        Layout definition after the leading H/V character.
-    orientation:
-        "horizontal" cuando describe filas (layouts H) y "vertical" cuando describe columnas (layouts V).
-        El separador "/" controla diagonales entre grupos y "*" las diagonales dentro de cada grupo.
-    """
+    """Parse layout strings into counts and diagonal metadata."""
     orientation = orientation.lower()
-    if orientation != "vertical":
-        between_chars = {"/"}
-        within_chars = {"*"}
-    else:
-        between_chars = {"/"}
-        within_chars = {"*"}
 
-    counts: List[int] = []
-    between_diagonals: List[DiagonalInfo] = []  # Between row/column groups
-    within_diagonals: List[DiagonalInfo] = []   # Within a row/column
-
-    if ":" in sequence:
-        layout_part, angle_part = sequence.rsplit(":", 1)
-        layout_part = layout_part.replace("|", "*")
+    angle_ratio = 0.0
+    layout_part = sequence
+    if ":" in layout_part:
+        layout_part, angle_part = layout_part.rsplit(":", 1)
         try:
             angle_degrees = float(angle_part)
             angle_ratio = min(max(angle_degrees / 90.0, 0.0), 1.0)
         except ValueError:
-            angle_ratio = 0.2
-    else:
-        layout_part = sequence.replace("|", "*")
-        angle_ratio = 0.2
+            angle_ratio = 0.0
 
-    pending_between = False
-    pending_within = False
+    digits = [int(char) for char in layout_part if char.isdigit()]
+    if not digits:
+        digits = [1]
 
-    for char in layout_part:
-        if char.isdigit():
-            counts.append(int(char))
+    counts = digits
+    between_diagonals: List[DiagonalInfo] = []
+    within_diagonals: List[DiagonalInfo] = []
 
-            if len(counts) > 1 and len(between_diagonals) < len(counts) - 1:
-                info = DiagonalInfo(angle=angle_ratio)
-                if pending_between:
-                    info.horizontal = True
-                between_diagonals.append(info)
-                pending_between = False
+    for index, count in enumerate(counts):
+        if index < len(counts) - 1:
+            info = DiagonalInfo(angle=angle_ratio)
+            info.horizontal = True
+            between_diagonals.append(info)
 
-            if pending_within:
-                while len(within_diagonals) < len(counts):
-                    within_diagonals.append(DiagonalInfo(angle=angle_ratio))
-                within_diagonals[len(counts) - 1].vertical = True
-                pending_within = False
-        elif char in between_chars:
-            pending_between = True
-        elif char in within_chars:
-            pending_within = True
-        else:
-            pending_between = False
-            pending_within = False
-
-    while len(between_diagonals) < max(len(counts) - 1, 0):
-        between_diagonals.append(DiagonalInfo(angle=angle_ratio))
-
-    while len(within_diagonals) < len(counts):
-        within_diagonals.append(DiagonalInfo(angle=angle_ratio))
-
-    if not counts:
-        counts = [1]
+        vertical_info = DiagonalInfo(angle=angle_ratio)
+        vertical_info.vertical = count > 1
+        within_diagonals.append(vertical_info)
 
     return counts, between_diagonals, within_diagonals

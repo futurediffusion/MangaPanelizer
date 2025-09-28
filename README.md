@@ -3,7 +3,7 @@
 MangaPanelizer es un paquete de nodos personalizados para ComfyUI enfocado en diseñar páginas de manga y cómic listas para imprimir. El nodo principal **CR_ComicPanelTemplates** genera composiciones limpias a partir de plantillas predefinidas o cadenas personalizadas y puede rellenar los paneles con tus imágenes renderizadas.
 
 ## Características clave
-- Plantillas G/H/V para cuadr?culas, filas y columnas con variaciones diagonales (`/`, `*`, `:angulo`).
+- Plantillas G/H/V para cuadr?culas, filas y columnas con ?ngulos controlados ?nicamente mediante `first_division_angle` y `second_division_angle`.
 - Controles separados para márgenes externos (`border_thickness`) y separación interna entre paneles (`internal_padding`).
 - Desplazamientos ajustables para diagonales (`first_division_angle`, `diagonal_slant_offset (second_division_angle)`) que permiten mover el punto de encuentro en ambos ejes.
 - Trazos uniformes con antialiasing para bordes y diagonales sin “sierra”.
@@ -39,31 +39,22 @@ Genera una página completa y devuelve:
 ## Plantillas incluidas
 ```
 G22  G33
-H2   H3   H12  H13  H21  H23  H31  H32  H1*2  H1/2  H2*1  H2/1
-V2   V3   V12  V13  V21  V23  V31  V32  V1*2  V1/2  V2*1  V2/1  V1/*2
+H2   H3   H12  H13  H21  H23  H31  H32
+V2   V3   V12  V13  V21  V23  V31  V32
 ```
-`*` y `/` indican versiones diagonales frecuentes. Usa `custom` para combinaciones más complejas.
+Las cadenas solo describen la estructura: letras `H` o `V` seguidas de d?gitos. Controla los ?ngulos desde los par?metros del nodo.
 
 ## Sintaxis de cadenas personalizadas
 1. Comienza con `H` (filas de arriba a abajo) o `V` (columnas de izquierda a derecha).
-2. Cada dígito representa cuántos paneles contiene ese bloque.
-3. Usa separadores para diagonales y offsets:
-   - `/` (horizontal):
-     - En plantillas `H`: diagonal entre filas adyacentes (panel inferior se inclina).
-     - En plantillas `V`: diagonal vertical entre columnas adyacentes.
-   - `*` (vertical dentro del bloque):
-     - En `H`: diagonal dentro de una fila, inclinando la línea que separa columnas.
-     - En `V`: diagonal horizontal dentro de una columna, inclinando la separación entre paneles apilados.
-   - `:ángulo`: opcional al final de la cadena para fijar el ángulo de las diagonales (0–90). Por defecto 18° aprox (`0.2`).
-
-4. Se admiten múltiples diagonales encadenadas: cada `/` o `*` afecta a la transición siguiente.
+2. Cada d?gito representa cu?ntos paneles contiene ese bloque.
+3. Mant?n `first_division_angle = 0` y `second_division_angle = 0` para divisiones rectas. Ajusta cualquiera de los dos par?metros para inclinar las l?neas cuando lo necesites.
 
 ### Ejemplos
-- `H1*2:30` ? Panel superior completo y dos paneles inferiores separados por una diagonal inclinada 30°.
-- `H2/1` ? Dos filas; diagonal entre la primera y segunda fila.
-- `V1*2` ? Columna izquierda completa y columna derecha con dos paneles separados por una diagonal horizontal.
-- `V1/2` ? Columna izquierda completa y diagonal vertical hacia una columna con dos paneles rectos.
-- `V2/*2` ? Dos columnas a la izquierda, diagonal vertical hacia una columna derecha con dos paneles y diagonal horizontal interna.
+- `H12` - Primer bloque a p?gina completa y segundo bloque dividido en dos columnas.
+- `H21` - Dos bloques arriba y uno abajo.
+- `V12` - Primera columna completa y segunda columna con dos paneles apilados.
+- `V21` - Dos columnas a la izquierda y una columna amplia a la derecha.
+- `V32` - Tres columnas principales y una columna con dos paneles apilados.
 
 ## Consejos de uso
 - **Separaciones**: `internal_padding` añade espacio entre paneles; `border_thickness` envuelve el lienzo final.

@@ -5,7 +5,7 @@ MangaPanelizer es un paquete de nodos personalizados para ComfyUI enfocado en di
 ## Características clave
 - Plantillas G/H/V para cuadr?culas, filas y columnas con variaciones diagonales (`/`, `*`, `:angulo`).
 - Controles separados para márgenes externos (`border_thickness`) y separación interna entre paneles (`internal_padding`).
-- Desplazamientos ajustables para diagonales (`first_division_angle`, `diagonal_slant_offset (division_horizontal_offset)`) que permiten mover el punto de encuentro en ambos ejes.
+- Desplazamientos ajustables para diagonales (`first_division_angle`, `diagonal_slant_offset (second_division_angle)`) que permiten mover el punto de encuentro en ambos ejes.
 - Trazos uniformes con antialiasing para bordes y diagonales sin “sierra”.
 - Colores personalizables para contorno, panel y fondo; compatibilidad con lotes de imágenes.
 - Lectura izquierda?derecha o derecha?izquierda con un solo cambio de parámetro.
@@ -31,7 +31,7 @@ Genera una página completa y devuelve:
 - `custom_panel_layout`: cadena usada cuando `template = custom` (se ignora en otros casos, pero siempre está visible para que puedas editarla rápido).
 - `internal_padding`: separación entre paneles sucesivos.
 - `first_division_angle`: desplaza la unión vertical de diagonales (afecta `H` y columnas dentro de `V`).
-- `diagonal_slant_offset (division_horizontal_offset)`: desplaza la unión horizontal de diagonales (afecta `H` y `V`).
+- `diagonal_slant_offset (second_division_angle)`: desplaza la unión horizontal de diagonales (afecta `H` y `V`).
 
 #### Entradas opcionales
 - `images`: lote de tensores. Cada panel recibe la siguiente imagen disponible; si faltan, se rellenan con el color del panel.
@@ -67,7 +67,7 @@ V2   V3   V12  V13  V21  V23  V31  V32  V1*2  V1/2  V2*1  V2/1  V1/*2
 
 ## Consejos de uso
 - **Separaciones**: `internal_padding` añade espacio entre paneles; `border_thickness` envuelve el lienzo final.
-- **Ajustes de diagonales**: combina `first_division_angle` y `diagonal_slant_offset (division_horizontal_offset)` para mover el punto de encuentro de las líneas. Valores positivos empujan hacia abajo/derecha, negativos hacia arriba/izquierda.
+- **Ajustes de diagonales**: combina `first_division_angle` y `diagonal_slant_offset (second_division_angle)` para mover el punto de encuentro de las líneas. Valores positivos empujan hacia abajo/derecha, negativos hacia arriba/izquierda.
 - **Antialiasing**: los bordes se trazan en alta resolución y se reducen, evitando “sierra” incluso con diagonales gruesas.
 - **Lectura oriental**: selecciona `right to left` para espejar toda la página sin cambiar la cadena de layout.
 - **Relleno de imágenes**: conecta una lista de tensores (por ejemplo, con `LoadImage` + `ImageBatch`). El nodo recorta cada imagen al aspecto del panel antes de pegarla.

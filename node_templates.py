@@ -83,7 +83,7 @@ class CR_ComicPanelTemplates:
                 "custom_panel_layout": ("STRING", {"multiline": True, "default": "H12", "forceInput": True}),
                 "internal_padding": ("INT", {"default": 0, "min": 0, "max": 1024}),
                 "first_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_angle_adjust"}),
-                "division_horizontal_offset": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_slant_offset"}),
+                "second_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_slant_offset"}),
             },
             "optional": {
                 "images": ("IMAGE",),
@@ -110,7 +110,7 @@ class CR_ComicPanelTemplates:
         images: Optional[Iterable[torch.Tensor]] = None,
         internal_padding: Optional[int] = None,
         first_division_angle: Optional[int] = None,
-        division_horizontal_offset: Optional[int] = None,
+        second_division_angle: Optional[int] = None,
     ):
         pil_images: List[Image.Image] = []
         if images is not None:
@@ -123,7 +123,7 @@ class CR_ComicPanelTemplates:
         external_padding = max(border_thickness, 0)
         internal_padding_value = max(internal_padding if internal_padding is not None else 0, 0)
 
-        horizontal_offset = division_horizontal_offset if division_horizontal_offset is not None else 0
+        horizontal_offset = second_division_angle if second_division_angle is not None else 0
         angle_adjust_value = float(first_division_angle if first_division_angle is not None else 0)
 
         content_width = max(page_width - (2 * external_padding), 1)

@@ -49,9 +49,9 @@ class CR_ComicPanelTemplates:
             "H23",
             "H31",
             "H32",
-            "H1|2",
+            "H1*2",
             "H1/2",
-            "H2|1",
+            "H2*1",
             "H2/1",
             "V2",
             "V3",
@@ -61,11 +61,11 @@ class CR_ComicPanelTemplates:
             "V23",
             "V31",
             "V32",
-            "V1|2",
+            "V1*2",
             "V1/2",
-            "V2|1",
+            "V2*1",
             "V2/1",
-            "V1/|2",
+            "V1/*2",
         ]
         directions = ["left to right", "right to left"]
 
@@ -82,8 +82,8 @@ class CR_ComicPanelTemplates:
                 "background_color": (COLORS,),
                 "custom_panel_layout": ("STRING", {"multiline": True, "default": "H12", "forceInput": True}),
                 "internal_padding": ("INT", {"default": 0, "min": 0, "max": 1024}),
-                "division_height_offset": ("INT", {"default": 0, "min": -200, "max": 200}),
-                "division_horizontal_offset": ("INT", {"default": 0, "min": -200, "max": 200}),
+                "division_height_offset": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_angle_adjust"}),
+                "division_horizontal_offset": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_slant_offset"}),
             },
             "optional": {
                 "images": ("IMAGE",),
@@ -123,8 +123,8 @@ class CR_ComicPanelTemplates:
         external_padding = max(border_thickness, 0)
         internal_padding_value = max(internal_padding if internal_padding is not None else 0, 0)
 
-        height_offset = division_height_offset if division_height_offset is not None else 0
         horizontal_offset = division_horizontal_offset if division_horizontal_offset is not None else 0
+        angle_adjust_value = float(division_height_offset if division_height_offset is not None else 0)
 
         content_width = max(page_width - (2 * external_padding), 1)
         content_height = max(page_height - (2 * external_padding), 1)
@@ -136,11 +136,13 @@ class CR_ComicPanelTemplates:
             else:
                 template = "H12"
 
+        template = template.replace("|", "*")
+
         first_char = template[0].upper()
         image_index = 0
         panels: List[PanelShape] = []
 
-        use_enhanced = "|" in template or ":" in template
+        use_enhanced = ("*" in template) or (":" in template)
         use_diagonal = "/" in template or use_enhanced
 
         if not use_diagonal:
@@ -264,13 +266,28 @@ class CR_ComicPanelTemplates:
                     diagonal_info = row_diagonals[index] if index < len(row_diagonals) else DiagonalInfo()
                     vertical_info = row_verticals[index] if index < len(row_verticals) else DiagonalInfo()
 
-                    bottom_left = top_left + panel_height
-                    bottom_right = top_right + panel_height
+                    bottom_left = clamp(top_left + panel_height, 0.0, float(content_height))
+                    base_bottom_right = clamp(top_right + panel_height, 0.0, float(content_height))
 
-                    if diagonal_info.horizontal:
+                    if diagonal_info.horizontal and index < len(row_counts) - 1:
+                        padding_buffer = float(internal_padding_value)
+                        effective_padding = min(padding_buffer, float(content_height))
                         base_offset = content_height * diagonal_info.angle
-                        adjusted_offset = base_offset + height_offset
-                        bottom_right = clamp(bottom_right + adjusted_offset, 0.0, float(content_height))
+                        baseline = clamp(base_bottom_right + base_offset, 0.0, float(content_height))
+                        positive_limit = max(baseline, float(content_height) - effective_padding)
+                        if angle_adjust_value > 0:
+                            factor = min(angle_adjust_value, 30.0) / 30.0
+                            bottom_right = baseline + (positive_limit - baseline) * factor
+                            bottom_right = clamp(bottom_right, 0.0, positive_limit)
+                        elif angle_adjust_value < 0:
+                            negative_limit = min(baseline, effective_padding)
+                            factor = max(angle_adjust_value, -30.0) / 30.0
+                            bottom_right = baseline + (baseline - negative_limit) * factor
+                            bottom_right = clamp(bottom_right, negative_limit, float(content_height))
+                        else:
+                            bottom_right = baseline
+                    else:
+                        bottom_right = bottom_left if index >= len(row_counts) - 1 else base_bottom_right
 
                     total_panel_width = panel_width * count
                     base_boundaries: List[float] = [
@@ -281,19 +298,37 @@ class CR_ComicPanelTemplates:
                     bottom_boundaries = base_boundaries.copy()
                     max_base_coordinate = max(total_panel_width, 0.0)
 
-                    if vertical_info.vertical and count > 1:
-                        offset = panel_height * vertical_info.angle + horizontal_offset
-                        for boundary_index in range(1, len(base_boundaries) - 1):
-                            top_boundaries[boundary_index] = clamp(
-                                base_boundaries[boundary_index] - offset / 2,
-                                0.0,
-                                max_base_coordinate,
-                            )
-                            bottom_boundaries[boundary_index] = clamp(
-                                base_boundaries[boundary_index] + offset / 2,
-                                0.0,
-                                max_base_coordinate,
-                            )
+                    if count > 1:
+                        base_angle = vertical_info.angle if vertical_info.vertical else 0.2
+                        magnitude = panel_height * base_angle
+                        if magnitude > 0.0 or horizontal_offset != 0:
+                            offset_ratio = max(min(horizontal_offset / 30.0, 1.0), -1.0)
+                            offset = magnitude * offset_ratio * 1.5
+                            max_offset_allowed = max(panel_height - internal_padding_value, 0.0)
+                            if offset != 0.0:
+                                interior_indices = range(1, len(base_boundaries) - 1)
+                                if interior_indices:
+                                    max_offsets = []
+                                    for boundary_index in interior_indices:
+                                        base_position = base_boundaries[boundary_index]
+                                        margin = min(base_position, max_base_coordinate - base_position)
+                                        max_offsets.append(max(0.0, margin * 2.0))
+                                    max_offset_allowed = min(max_offsets) if max_offsets else abs(offset)
+                                else:
+                                    max_offset_allowed = abs(offset)
+                                if max_offset_allowed > 0.0:
+                                    offset = clamp(offset, -max_offset_allowed, max_offset_allowed)
+                                for boundary_index in interior_indices:
+                                    top_boundaries[boundary_index] = clamp(
+                                        base_boundaries[boundary_index] - offset / 2,
+                                        0.0,
+                                        max_base_coordinate,
+                                    )
+                                    bottom_boundaries[boundary_index] = clamp(
+                                        base_boundaries[boundary_index] + offset / 2,
+                                        0.0,
+                                        max_base_coordinate,
+                                    )
 
                     for col in range(count):
                         padding_offset = internal_padding_value * col
@@ -339,12 +374,30 @@ class CR_ComicPanelTemplates:
                     vertical_info = column_verticals[index] if index < len(column_verticals) else DiagonalInfo()
 
                     right_top = clamp(left_top + panel_width, 0.0, float(content_width))
-                    right_bottom = clamp(left_bottom + panel_width, 0.0, float(content_width))
+                    base_right_bottom = clamp(left_bottom + panel_width, 0.0, float(content_width))
 
-                    if diagonal_info.horizontal:
-                        base_offset = content_height * diagonal_info.angle
-                        adjusted_offset = base_offset + horizontal_offset
-                        right_bottom = clamp(right_bottom + adjusted_offset, 0.0, float(content_width))
+                    if diagonal_info.horizontal and index < len(column_counts) - 1:
+                        padding_buffer = float(internal_padding_value)
+                        effective_padding = min(padding_buffer, float(content_width))
+                        base_offset = content_width * diagonal_info.angle
+                        baseline = clamp(base_right_bottom + base_offset, 0.0, float(content_width))
+                        positive_limit = max(baseline, float(content_width) - effective_padding)
+                        if angle_adjust_value > 0:
+                            factor = min(angle_adjust_value, 30.0) / 30.0
+                            right_bottom = baseline + (positive_limit - baseline) * factor
+                            right_bottom = clamp(right_bottom, 0.0, positive_limit)
+                        elif angle_adjust_value < 0:
+                            negative_limit = min(baseline, effective_padding)
+                            factor = max(angle_adjust_value, -30.0) / 30.0
+                            right_bottom = baseline + (baseline - negative_limit) * factor
+                            right_bottom = clamp(right_bottom, negative_limit, float(content_width))
+                        else:
+                            right_bottom = baseline
+                    else:
+                        right_bottom = base_right_bottom
+
+                    if index >= len(column_counts) - 1:
+                        right_bottom = clamp(right_top, 0.0, float(content_width))
 
                     panel_height = compute_panel_span(content_height, count, internal_padding_value)
                     base_boundaries: List[float] = [
@@ -355,19 +408,37 @@ class CR_ComicPanelTemplates:
                     right_boundaries = base_boundaries.copy()
                     max_base_coordinate = panel_height * count
 
-                    if vertical_info.vertical and count > 1:
-                        offset = panel_width * vertical_info.angle + height_offset
-                        for boundary_index in range(1, len(base_boundaries) - 1):
-                            left_boundaries[boundary_index] = clamp(
-                                base_boundaries[boundary_index] - offset / 2,
-                                0.0,
-                                max_base_coordinate,
-                            )
-                            right_boundaries[boundary_index] = clamp(
-                                base_boundaries[boundary_index] + offset / 2,
-                                0.0,
-                                max_base_coordinate,
-                            )
+                    if count > 1:
+                        base_angle = vertical_info.angle if vertical_info.vertical else 0.2
+                        magnitude = panel_width * base_angle
+                        if magnitude > 0.0 or horizontal_offset != 0:
+                            offset_ratio = max(min(horizontal_offset / 30.0, 1.0), -1.0)
+                            offset = magnitude * offset_ratio * 1.5
+                            max_offset_allowed = max(panel_width - internal_padding_value, 0.0)
+                            if offset != 0.0:
+                                interior_indices = range(1, len(base_boundaries) - 1)
+                                if interior_indices:
+                                    max_offsets = []
+                                    for boundary_index in interior_indices:
+                                        base_position = base_boundaries[boundary_index]
+                                        margin = min(base_position, max_base_coordinate - base_position)
+                                        max_offsets.append(max(0.0, margin * 2.0))
+                                    max_offset_allowed = min(max_offsets) if max_offsets else abs(offset)
+                                else:
+                                    max_offset_allowed = abs(offset)
+                                if max_offset_allowed > 0.0:
+                                    offset = clamp(offset, -max_offset_allowed, max_offset_allowed)
+                                for boundary_index in interior_indices:
+                                    left_boundaries[boundary_index] = clamp(
+                                        base_boundaries[boundary_index] - offset / 2,
+                                        0.0,
+                                        max_base_coordinate,
+                                    )
+                                    right_boundaries[boundary_index] = clamp(
+                                        base_boundaries[boundary_index] + offset / 2,
+                                        0.0,
+                                        max_base_coordinate,
+                                    )
 
                     for row in range(count):
                         padding_offset = internal_padding_value * row
@@ -422,8 +493,8 @@ class CR_ComicPanelTemplates:
 
         show_help = (
             "MangaPanelizer: Create manga panel layouts. Use 'internal_padding' for spacing between panels. "
-            "Use 'division_height_offset' to control diagonal height and 'division_horizontal_offset' for horizontal adjustment. "
-            "Custom layouts support: H123 (horizontal), V123 (vertical), / for diagonals, | for vertical splits, :angle for custom angles."
+            "Use 'diagonal_angle_adjust' (division_height_offset) para inclinar las diagonales (/) y 'diagonal_slant_offset' para desplazarlas. "
+            "Custom layouts support: H123 (horizontal), V123 (vertical), / for diagonals, * for vertical splits, :angle for custom angles."
         )
 
         return (pil2tensor(page), show_help)

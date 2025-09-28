@@ -64,12 +64,16 @@ def parse_enhanced_layout_sequence(sequence: str, orientation: str = "horizontal
     sequence:
         Layout definition after the leading H/V character.
     orientation:
-        "horizontal" when describing rows (H layouts) and "vertical" when describing columns (V layouts).
-        The meaning of "/" and "|" swaps depending on the orientation.
+        "horizontal" cuando describe filas (layouts H) y "vertical" cuando describe columnas (layouts V).
+        El separador "/" controla diagonales entre grupos y "*" las diagonales dentro de cada grupo.
     """
     orientation = orientation.lower()
-    between_char = "/" if orientation != "vertical" else "|"
-    within_char = "|" if orientation != "vertical" else "/"
+    if orientation != "vertical":
+        between_chars = {"/"}
+        within_chars = {"*"}
+    else:
+        between_chars = {"/"}
+        within_chars = {"*"}
 
     counts: List[int] = []
     between_diagonals: List[DiagonalInfo] = []  # Between row/column groups
@@ -77,13 +81,14 @@ def parse_enhanced_layout_sequence(sequence: str, orientation: str = "horizontal
 
     if ":" in sequence:
         layout_part, angle_part = sequence.rsplit(":", 1)
+        layout_part = layout_part.replace("|", "*")
         try:
             angle_degrees = float(angle_part)
             angle_ratio = min(max(angle_degrees / 90.0, 0.0), 1.0)
         except ValueError:
             angle_ratio = 0.2
     else:
-        layout_part = sequence
+        layout_part = sequence.replace("|", "*")
         angle_ratio = 0.2
 
     pending_between = False
@@ -105,9 +110,9 @@ def parse_enhanced_layout_sequence(sequence: str, orientation: str = "horizontal
                     within_diagonals.append(DiagonalInfo(angle=angle_ratio))
                 within_diagonals[len(counts) - 1].vertical = True
                 pending_within = False
-        elif char == between_char:
+        elif char in between_chars:
             pending_between = True
-        elif char == within_char:
+        elif char in within_chars:
             pending_within = True
         else:
             pending_between = False

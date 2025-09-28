@@ -3,9 +3,9 @@
 MangaPanelizer es un paquete de nodos personalizados para ComfyUI enfocado en diseñar páginas de manga y cómic listas para imprimir. El nodo principal **CR_ComicPanelTemplates** genera composiciones limpias a partir de plantillas predefinidas o cadenas personalizadas y puede rellenar los paneles con tus imágenes renderizadas.
 
 ## Características clave
-- Plantillas G/H/V para cuadrículas, filas y columnas con variaciones diagonales (`/`, `|`, `:ángulo`).
+- Plantillas G/H/V para cuadr?culas, filas y columnas con variaciones diagonales (`/`, `*`, `:angulo`).
 - Controles separados para márgenes externos (`border_thickness`) y separación interna entre paneles (`internal_padding`).
-- Desplazamientos ajustables para diagonales (`division_height_offset`, `division_horizontal_offset`) que permiten mover el punto de encuentro en ambos ejes.
+- Desplazamientos ajustables para diagonales (`division_height_offset`, `diagonal_slant_offset (division_horizontal_offset)`) que permiten mover el punto de encuentro en ambos ejes.
 - Trazos uniformes con antialiasing para bordes y diagonales sin “sierra”.
 - Colores personalizables para contorno, panel y fondo; compatibilidad con lotes de imágenes.
 - Lectura izquierda?derecha o derecha?izquierda con un solo cambio de parámetro.
@@ -31,7 +31,7 @@ Genera una página completa y devuelve:
 - `custom_panel_layout`: cadena usada cuando `template = custom` (se ignora en otros casos, pero siempre está visible para que puedas editarla rápido).
 - `internal_padding`: separación entre paneles sucesivos.
 - `division_height_offset`: desplaza la unión vertical de diagonales (afecta `H` y columnas dentro de `V`).
-- `division_horizontal_offset`: desplaza la unión horizontal de diagonales (afecta `H` y `V`).
+- `diagonal_slant_offset (division_horizontal_offset)`: desplaza la unión horizontal de diagonales (afecta `H` y `V`).
 
 #### Entradas opcionales
 - `images`: lote de tensores. Cada panel recibe la siguiente imagen disponible; si faltan, se rellenan con el color del panel.
@@ -39,10 +39,10 @@ Genera una página completa y devuelve:
 ## Plantillas incluidas
 ```
 G22  G33
-H2   H3   H12  H13  H21  H23  H31  H32  H1|2  H1/2  H2|1  H2/1
-V2   V3   V12  V13  V21  V23  V31  V32  V1|2  V1/2  V2|1  V2/1  V1/|2
+H2   H3   H12  H13  H21  H23  H31  H32  H1*2  H1/2  H2*1  H2/1
+V2   V3   V12  V13  V21  V23  V31  V32  V1*2  V1/2  V2*1  V2/1  V1/*2
 ```
-`|` y `/` indican versiones diagonales frecuentes. Usa `custom` para combinaciones más complejas.
+`*` y `/` indican versiones diagonales frecuentes. Usa `custom` para combinaciones más complejas.
 
 ## Sintaxis de cadenas personalizadas
 1. Comienza con `H` (filas de arriba a abajo) o `V` (columnas de izquierda a derecha).
@@ -51,23 +51,23 @@ V2   V3   V12  V13  V21  V23  V31  V32  V1|2  V1/2  V2|1  V2/1  V1/|2
    - `/` (horizontal):
      - En plantillas `H`: diagonal entre filas adyacentes (panel inferior se inclina).
      - En plantillas `V`: diagonal vertical entre columnas adyacentes.
-   - `|` (vertical dentro del bloque):
+   - `*` (vertical dentro del bloque):
      - En `H`: diagonal dentro de una fila, inclinando la línea que separa columnas.
      - En `V`: diagonal horizontal dentro de una columna, inclinando la separación entre paneles apilados.
    - `:ángulo`: opcional al final de la cadena para fijar el ángulo de las diagonales (0–90). Por defecto 18° aprox (`0.2`).
 
-4. Se admiten múltiples diagonales encadenadas: cada `/` o `|` afecta a la transición siguiente.
+4. Se admiten múltiples diagonales encadenadas: cada `/` o `*` afecta a la transición siguiente.
 
 ### Ejemplos
-- `H1|2:30` ? Panel superior completo y dos paneles inferiores separados por una diagonal inclinada 30°.
+- `H1*2:30` ? Panel superior completo y dos paneles inferiores separados por una diagonal inclinada 30°.
 - `H2/1` ? Dos filas; diagonal entre la primera y segunda fila.
-- `V1|2` ? Columna izquierda completa y columna derecha con dos paneles separados por una diagonal horizontal.
+- `V1*2` ? Columna izquierda completa y columna derecha con dos paneles separados por una diagonal horizontal.
 - `V1/2` ? Columna izquierda completa y diagonal vertical hacia una columna con dos paneles rectos.
-- `V2/|2` ? Dos columnas a la izquierda, diagonal vertical hacia una columna derecha con dos paneles y diagonal horizontal interna.
+- `V2/*2` ? Dos columnas a la izquierda, diagonal vertical hacia una columna derecha con dos paneles y diagonal horizontal interna.
 
 ## Consejos de uso
 - **Separaciones**: `internal_padding` añade espacio entre paneles; `border_thickness` envuelve el lienzo final.
-- **Ajustes de diagonales**: combina `division_height_offset` y `division_horizontal_offset` para mover el punto de encuentro de las líneas. Valores positivos empujan hacia abajo/derecha, negativos hacia arriba/izquierda.
+- **Ajustes de diagonales**: combina `division_height_offset` y `diagonal_slant_offset (division_horizontal_offset)` para mover el punto de encuentro de las líneas. Valores positivos empujan hacia abajo/derecha, negativos hacia arriba/izquierda.
 - **Antialiasing**: los bordes se trazan en alta resolución y se reducen, evitando “sierra” incluso con diagonales gruesas.
 - **Lectura oriental**: selecciona `right to left` para espejar toda la página sin cambiar la cadena de layout.
 - **Relleno de imágenes**: conecta una lista de tensores (por ejemplo, con `LoadImage` + `ImageBatch`). El nodo recorta cada imagen al aspecto del panel antes de pegarla.

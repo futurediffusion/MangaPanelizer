@@ -10,7 +10,7 @@
 from .node_mappings import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 
 print("-------------------------------")
-print("\033[34mMangaPanelizer\033[0m : \033[92m1 node loaded\033[0m")
+print("\033[34mMangaPanelizer\033[0m : \033[92m2 nodes loaded\033[0m")
 print("-------------------------------")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

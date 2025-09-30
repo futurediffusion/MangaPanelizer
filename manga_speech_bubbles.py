@@ -244,40 +244,52 @@ def _create_bubble_with_pointer(
         draw.polygon([base_left, tip, base_right], fill=fill_color)
         return bubble_img
     
-    # Determine correct insertion order based on angular positions
-    # The bubble is traced counter-clockwise (standard for PIL polygons)
-    # We need to insert the pointer points in the correct order
-    
-    # Calculate which base point comes first in counter-clockwise order from 0°
+    # Determine the orientation of the pointer insertion relative to the
+    # counter-clockwise bubble outline.  Instead of simply choosing the point
+    # closest to one of the bases (which can lead to self-intersections when the
+    # margin removes most of the neighbouring outline points), we compare the
+    # travel distance along the outline between the two nearest locations.
+
+    def _nearest_index(point):
+        closest_index = 0
+        closest_dist = float("inf")
+        for idx, candidate in enumerate(bubble_points):
+            dist = math.hypot(candidate[0] - point[0], candidate[1] - point[1])
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_index = idx
+        return closest_index
+
+    idx_left = _nearest_index(base_left)
+    idx_right = _nearest_index(base_right)
+
     angle_diff = (angle_right - angle_left) % 360
-    
-    # If angle_diff < 180, right comes after left in CCW order
-    # So we go: left -> tip -> right
-    # Otherwise: right -> tip -> left
-    if angle_diff < 180:
-        first_base = base_left
-        second_base = base_right
-        first_angle = angle_left
+
+    if idx_left == idx_right:
+        # When both bases map to the same outline vertex (can happen with small
+        # exclusion margins), fall back to angular ordering.
+        if angle_diff < 180:
+            insert_idx = idx_left
+            insert_sequence = [base_left, tip, base_right]
+        else:
+            insert_idx = idx_right
+            insert_sequence = [base_right, tip, base_left]
     else:
-        first_base = base_right
-        second_base = base_left
-        first_angle = angle_right
-    
-    # Find insertion point: the point in bubble_points closest to first_base
-    insert_idx = 0
-    min_dist = float('inf')
-    
-    for i, point in enumerate(bubble_points):
-        dist = math.hypot(point[0] - first_base[0], point[1] - first_base[1])
-        if dist < min_dist:
-            min_dist = dist
-            insert_idx = i
-    
-    # Insert after this point
+        total_points = len(bubble_points)
+        forward_distance = (idx_right - idx_left) % total_points
+        backward_distance = (idx_left - idx_right) % total_points
+
+        if forward_distance != 0 and (forward_distance < backward_distance or backward_distance == 0):
+            insert_idx = idx_left
+            insert_sequence = [base_left, tip, base_right]
+        else:
+            insert_idx = idx_right
+            insert_sequence = [base_right, tip, base_left]
+
     final_points = (
-        bubble_points[:insert_idx + 1] +
-        [first_base, tip, second_base] +
-        bubble_points[insert_idx + 1:]
+        bubble_points[:insert_idx + 1]
+        + insert_sequence
+        + bubble_points[insert_idx + 1:]
     )
     
     # Draw filled polygon

@@ -29,7 +29,6 @@ color_mapping = {
     "lavender": (230, 230, 250),
     "violet": (238, 130, 238),
     "coral": (255, 127, 80),
-    "indigo": (75, 0, 130),
 }
 
 COLORS = [
@@ -62,5 +61,4 @@ COLORS = [
     "lavender",
     "violet",
     "coral",
-    "indigo",
 ]

@@ -12,8 +12,23 @@ from .config import COLORS, color_mapping
 from .core.imaging import pil2tensor, tensor2pil
 
 ROTATE_OPTIONS = ["text center", "image center"]
-def _resolve_color(selection: str, mapping: dict[str, Tuple[int, int, int]]) -> Tuple[int, int, int]:
-    return mapping.get(selection, mapping.get("black", (0, 0, 0)))
+
+
+def _resolve_color(
+    selection: str | None,
+    mapping: dict[str, Tuple[int, int, int]],
+    fallback: str,
+) -> Tuple[int, int, int]:
+    """Resolve a named colour to an RGB triple with a safe fallback."""
+
+    if not selection:
+        selection = fallback
+
+    normalised = selection.lower()
+    if normalised == "custom":
+        normalised = fallback
+
+    return mapping.get(normalised, mapping.get(fallback, (0, 0, 0)))
 
 
 def _load_font(font_dir: str, font_name: str, font_size: int) -> ImageFont.FreeTypeFont:
@@ -75,17 +90,25 @@ class MangaSpeechBubbleOverlay:
                 "font_color": (COLORS, {"default": "black"}),
                 "bubble_color": (COLORS, {"default": "white"}),
                 "border_color": (COLORS, {"default": "black"}),
-                "border_thickness": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 64.0, "step": 0.5}),
+                "border_thickness": (
+                    "FLOAT",
+                    {"default": 6.0, "min": 0.0, "max": 64.0, "step": 0.5},
+                ),
                 "bubble_width": ("INT", {"default": 450, "min": 32, "max": 2048}),
                 "bubble_height": ("INT", {"default": 200, "min": 32, "max": 2048}),
                 "corner_radius": ("INT", {"default": 40, "min": 1, "max": 100}),
-                "text_position_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
-                "text_position_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
                 "line_spacing": ("INT", {"default": 4, "min": -256, "max": 256}),
                 "position_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
                 "position_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
-                "rotation_angle": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0, "step": 0.1}),
+                "rotation_angle": (
+                    "FLOAT",
+                    {"default": 0.0, "min": -360.0, "max": 360.0, "step": 0.1},
+                ),
                 "rotation_options": (ROTATE_OPTIONS,),
+            },
+            "optional": {
+                "text_position_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+                "text_position_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
             },
         }
 
@@ -107,20 +130,23 @@ class MangaSpeechBubbleOverlay:
         bubble_width,
         bubble_height,
         corner_radius,
-        text_position_x,
-        text_position_y,
         line_spacing,
         position_x,
         position_y,
         rotation_angle,
         rotation_options,
+        text_position_x: int | None = 0,
+        text_position_y: int | None = 0,
     ):
         if bubble_width <= 0 or bubble_height <= 0:
             raise ValueError("Speech bubble dimensions must be greater than zero.")
 
-        text_color = _resolve_color(font_color, color_mapping)
-        fill_color = _resolve_color(bubble_color, color_mapping)
-        outline_color = _resolve_color(border_color, color_mapping)
+        text_color = _resolve_color(font_color, color_mapping, "black")
+        fill_color = _resolve_color(bubble_color, color_mapping, "white")
+        outline_color = _resolve_color(border_color, color_mapping, "black")
+
+        text_position_x = int(text_position_x or 0)
+        text_position_y = int(text_position_y or 0)
 
         image_3d = image[0, :, :, :]
         background = tensor2pil(image_3d).convert("RGBA")

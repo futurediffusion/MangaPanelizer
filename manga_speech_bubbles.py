@@ -21,7 +21,6 @@ def _resolve_color(
     fallback: str,
 ) -> Tuple[int, int, int]:
     """Resolve a named colour to an RGB triple with a safe fallback."""
-
     if not selection:
         selection = fallback
 
@@ -70,96 +69,226 @@ def _draw_text(draw: ImageDraw.ImageDraw,
             cursor_y += line_spacing
 
 
-def _draw_pointer(
-    draw: ImageDraw.ImageDraw,
-    bubble_box: Tuple[float, float, float, float],
+def _angle_normalize(angle):
+    """Normalize angle to [0, 360)."""
+    return angle % 360.0
+
+
+def _angle_in_range(angle, start, end):
+    """Check if angle is in range [start, end], handling wraparound."""
+    angle = _angle_normalize(angle)
+    start = _angle_normalize(start)
+    end = _angle_normalize(end)
+    
+    if start <= end:
+        return start <= angle <= end
+    else:
+        return angle >= start or angle <= end
+
+
+def _point_at_angle_on_rounded_rect(center_x, center_y, half_width, half_height, radius, angle_deg):
+    """Find point on rounded rectangle boundary at given angle from center."""
+    angle_rad = math.radians(angle_deg)
+    dx = math.cos(angle_rad)
+    dy = math.sin(angle_rad)
+    
+    # Simple ellipse approximation for main body
+    effective_rx = half_width - radius / 2
+    effective_ry = half_height - radius / 2
+    
+    denom = math.sqrt((dx ** 2) / max(effective_rx ** 2, 0.1) + (dy ** 2) / max(effective_ry ** 2, 0.1))
+    distance = 1.0 / denom if denom > 0 else 0
+    
+    px = center_x + dx * distance
+    py = center_y + dy * distance
+    
+    return px, py
+
+
+def _generate_rounded_rect_points(x0, y0, x1, y1, radius, exclude_start_angle=None, exclude_end_angle=None, segments_per_corner=12):
+    """Generate points for rounded rectangle, optionally excluding an angular range."""
+    points = []
+    
+    max_radius = min((x1 - x0) / 2, (y1 - y0) / 2)
+    radius = min(radius, max_radius)
+    
+    center_x = (x0 + x1) / 2
+    center_y = (y0 + y1) / 2
+    
+    # Corner centers
+    corners = [
+        (x0 + radius, y0 + radius, 180, 270),  # Top-left
+        (x1 - radius, y0 + radius, 270, 360),  # Top-right
+        (x1 - radius, y1 - radius, 0, 90),     # Bottom-right
+        (x0 + radius, y1 - radius, 90, 180),   # Bottom-left
+    ]
+    
+    for cx, cy, angle_start, angle_end in corners:
+        for i in range(segments_per_corner + 1):
+            t = i / segments_per_corner
+            arc_angle = angle_start + (angle_end - angle_start) * t
+            arc_rad = math.radians(arc_angle)
+            
+            px = cx + radius * math.cos(arc_rad)
+            py = cy + radius * math.sin(arc_rad)
+            
+            # Calculate angle from center
+            point_angle = math.degrees(math.atan2(py - center_y, px - center_x)) % 360
+            
+            # Skip if in excluded range
+            if exclude_start_angle is not None and exclude_end_angle is not None:
+                if _angle_in_range(point_angle, exclude_start_angle, exclude_end_angle):
+                    continue
+            
+            points.append((px, py))
+    
+    return points
+
+
+def _create_bubble_with_pointer(
+    width: int,
+    height: int,
     corner_radius: int,
     pointer_length: float,
     pointer_angle: float,
     fill_color: Tuple[int, int, int, int],
     outline_color: Tuple[int, int, int, int],
     outline_width: int,
-) -> None:
-    if pointer_length <= 0.0:
-        return
-
-    bubble_x0, bubble_y0, bubble_x1, bubble_y1 = bubble_box
-    bubble_width = bubble_x1 - bubble_x0
-    bubble_height = bubble_y1 - bubble_y0
-
-    if bubble_width <= 0 or bubble_height <= 0:
-        return
-
-    center_x = bubble_x0 + bubble_width / 2.0
-    center_y = bubble_y0 + bubble_height / 2.0
-
-    angle_rad = math.radians(pointer_angle % 360.0)
+    pointer_buffer: int,
+) -> Image.Image:
+    """Create a speech bubble with pointer as a single unified polygon."""
+    
+    total_width = width + pointer_buffer * 2
+    total_height = height + pointer_buffer * 2
+    
+    bubble_img = Image.new("RGBA", (total_width, total_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(bubble_img, "RGBA")
+    
+    bubble_x0 = float(pointer_buffer)
+    bubble_y0 = float(pointer_buffer)
+    bubble_x1 = float(pointer_buffer + width)
+    bubble_y1 = float(pointer_buffer + height)
+    
+    center_x = (bubble_x0 + bubble_x1) / 2
+    center_y = (bubble_y0 + bubble_y1) / 2
+    half_width = width / 2
+    half_height = height / 2
+    
+    clamped_radius = max(0, min(corner_radius, min(width, height) // 2))
+    
+    if pointer_length <= 0:
+        # No pointer, simple rounded rectangle
+        draw.rounded_rectangle(
+            (bubble_x0, bubble_y0, bubble_x1, bubble_y1),
+            radius=clamped_radius,
+            fill=fill_color,
+            outline=outline_color if outline_width > 0 else None,
+            width=outline_width if outline_width > 0 else 1,
+        )
+        return bubble_img
+    
+    # Calculate pointer geometry
+    pointer_angle_norm = _angle_normalize(pointer_angle)
+    angle_rad = math.radians(pointer_angle_norm)
     direction_x = math.cos(angle_rad)
     direction_y = math.sin(angle_rad)
-
-    if math.isclose(direction_x, 0.0, abs_tol=1e-6) and math.isclose(direction_y, 0.0, abs_tol=1e-6):
-        return
-
-    rx = max((bubble_width / 2.0) - max(corner_radius / 2.0, outline_width), 1.0)
-    ry = max((bubble_height / 2.0) - max(corner_radius / 2.0, outline_width), 1.0)
-    denom = math.sqrt((direction_x ** 2) / (rx ** 2) + (direction_y ** 2) / (ry ** 2))
-    boundary_distance = 0.0 if denom == 0 else 1.0 / denom
-
-    base_border_x = center_x + direction_x * boundary_distance
-    base_border_y = center_y + direction_y * boundary_distance
-
+    
+    # Find attachment point on bubble edge
+    base_x, base_y = _point_at_angle_on_rounded_rect(
+        center_x, center_y, half_width, half_height, clamped_radius, pointer_angle_norm
+    )
+    
+    # Pointer base width
+    pointer_base_width = min(max(pointer_length * 0.35, 18.0), 70.0)
+    half_base = pointer_base_width / 2
+    
+    # Tangent (perpendicular to direction)
     tangent_x = -direction_y
     tangent_y = direction_x
-    tangent_length = math.hypot(tangent_x, tangent_y) or 1.0
-    tangent_x /= tangent_length
-    tangent_y /= tangent_length
-
-    base_half_width = max(pointer_length * 0.25, outline_width * 1.5, 12.0)
-
-    base_border_left = (
-        base_border_x + tangent_x * base_half_width,
-        base_border_y + tangent_y * base_half_width,
+    
+    # Three pointer points
+    base_left = (base_x + tangent_x * half_base, base_y + tangent_y * half_base)
+    base_right = (base_x - tangent_x * half_base, base_y - tangent_y * half_base)
+    tip = (base_x + direction_x * pointer_length, base_y + direction_y * pointer_length)
+    
+    # Calculate angles of base points
+    angle_left = math.degrees(math.atan2(base_left[1] - center_y, base_left[0] - center_x)) % 360
+    angle_right = math.degrees(math.atan2(base_right[1] - center_y, base_right[0] - center_x)) % 360
+    
+    # Determine exclusion range for bubble outline (expanded for safety)
+    margin = 5  # degrees
+    if abs(angle_right - angle_left) > 180:
+        # Wraparound case
+        exclude_start = _angle_normalize(angle_right - margin)
+        exclude_end = _angle_normalize(angle_left + margin)
+    else:
+        exclude_start = _angle_normalize(min(angle_left, angle_right) - margin)
+        exclude_end = _angle_normalize(max(angle_left, angle_right) + margin)
+    
+    # Generate bubble outline points, excluding pointer zone
+    bubble_points = _generate_rounded_rect_points(
+        bubble_x0, bubble_y0, bubble_x1, bubble_y1,
+        clamped_radius,
+        exclude_start,
+        exclude_end,
+        segments_per_corner=15
     )
-    base_border_right = (
-        base_border_x - tangent_x * base_half_width,
-        base_border_y - tangent_y * base_half_width,
+    
+    if not bubble_points:
+        # Fallback
+        draw.rounded_rectangle(
+            (bubble_x0, bubble_y0, bubble_x1, bubble_y1),
+            radius=clamped_radius,
+            fill=fill_color,
+        )
+        draw.polygon([base_left, tip, base_right], fill=fill_color)
+        return bubble_img
+    
+    # Determine correct insertion order based on angular positions
+    # The bubble is traced counter-clockwise (standard for PIL polygons)
+    # We need to insert the pointer points in the correct order
+    
+    # Calculate which base point comes first in counter-clockwise order from 0°
+    angle_diff = (angle_right - angle_left) % 360
+    
+    # If angle_diff < 180, right comes after left in CCW order
+    # So we go: left -> tip -> right
+    # Otherwise: right -> tip -> left
+    if angle_diff < 180:
+        first_base = base_left
+        second_base = base_right
+        first_angle = angle_left
+    else:
+        first_base = base_right
+        second_base = base_left
+        first_angle = angle_right
+    
+    # Find insertion point: the point in bubble_points closest to first_base
+    insert_idx = 0
+    min_dist = float('inf')
+    
+    for i, point in enumerate(bubble_points):
+        dist = math.hypot(point[0] - first_base[0], point[1] - first_base[1])
+        if dist < min_dist:
+            min_dist = dist
+            insert_idx = i
+    
+    # Insert after this point
+    final_points = (
+        bubble_points[:insert_idx + 1] +
+        [first_base, tip, second_base] +
+        bubble_points[insert_idx + 1:]
     )
-
-    join_offset = max(outline_width * 0.5, 2.0)
-    base_inner_left = (
-        base_border_left[0] - direction_x * join_offset,
-        base_border_left[1] - direction_y * join_offset,
-    )
-    base_inner_right = (
-        base_border_right[0] - direction_x * join_offset,
-        base_border_right[1] - direction_y * join_offset,
-    )
-
-    tip_distance = pointer_length + join_offset
-
-    tip = (
-        base_border_x + direction_x * tip_distance,
-        base_border_y + direction_y * tip_distance,
-    )
-
-    polygon_points = [
-        base_inner_left,
-        base_border_left,
-        tip,
-        base_border_right,
-        base_inner_right,
-    ]
-
-    draw.polygon(polygon_points, fill=fill_color)
-
+    
+    # Draw filled polygon
+    draw.polygon(final_points, fill=fill_color)
+    
+    # Draw outline
     if outline_width > 0:
-        outer_border = [
-            base_border_left,
-            tip,
-            base_border_right,
-            base_border_left,
-        ]
-        draw.line(outer_border, fill=outline_color, width=outline_width, joint="curve")
+        closed_points = final_points + [final_points[0]]
+        draw.line(closed_points, fill=outline_color, width=outline_width, joint="curve")
+    
+    return bubble_img
 
 
 class MangaSpeechBubbleOverlay:
@@ -193,7 +322,7 @@ class MangaSpeechBubbleOverlay:
                 "line_spacing": ("INT", {"default": 4, "min": -256, "max": 256}),
                 "pointer_length": (
                     "FLOAT",
-                    {"default": 0.0, "min": 0.0, "max": 1024.0, "step": 0.5},
+                    {"default": 0.0, "min": 0.0, "max": 2048.0, "step": 0.5},
                 ),
                 "pointer_angle": (
                     "FLOAT",
@@ -260,54 +389,23 @@ class MangaSpeechBubbleOverlay:
         pointer_length_value = float(pointer_length or 0.0)
         pointer_buffer = 0
         if pointer_length_value > 0.0:
-            join_offset = max(outline_width * 0.5, 2.0)
-            pointer_buffer = int(math.ceil(pointer_length_value + join_offset + outline_width))
+            pointer_buffer = int(math.ceil(pointer_length_value + outline_width * 2))
 
-        total_width = bubble_width + pointer_buffer * 2
-        total_height = bubble_height + pointer_buffer * 2
-
-        bubble_bounds = (
-            float(pointer_buffer),
-            float(pointer_buffer),
-            float(pointer_buffer + bubble_width),
-            float(pointer_buffer + bubble_height),
-        )
-
-        bubble_image = Image.new("RGBA", (total_width, total_height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(bubble_image, "RGBA")
-
-        clamped_radius = max(
-            0,
-            min(int(corner_radius), min(bubble_width, bubble_height) // 2),
-        )
-
-        draw.rounded_rectangle(
-            bubble_bounds,
-            radius=clamped_radius,
-            fill=(*fill_color, 255),
-        )
-
-        pointer_fill = (*fill_color, 255)
-        pointer_outline = (*outline_color, 255)
-        _draw_pointer(
-            draw,
-            bubble_bounds,
-            clamped_radius,
+        # Create bubble with pointer
+        bubble_image = _create_bubble_with_pointer(
+            bubble_width,
+            bubble_height,
+            corner_radius,
             pointer_length_value,
             float(pointer_angle or 0.0),
-            pointer_fill,
-            pointer_outline,
+            (*fill_color, 255),
+            (*outline_color, 255),
             outline_width,
+            pointer_buffer,
         )
 
-        if outline_width:
-            draw.rounded_rectangle(
-                bubble_bounds,
-                radius=clamped_radius,
-                outline=(*outline_color, 255),
-                width=outline_width,
-            )
-
+        # Draw text
+        draw = ImageDraw.Draw(bubble_image, "RGBA")
         font_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "fonts")
         font = _load_font(font_dir, font_name, font_size)
 
@@ -328,10 +426,12 @@ class MangaSpeechBubbleOverlay:
             text_fill,
         )
 
+        # Composite
         composite_layer = Image.new("RGBA", background.size, (0, 0, 0, 0))
         paste_position = (position_x - pointer_buffer, position_y - pointer_buffer)
         composite_layer.paste(bubble_image, paste_position, bubble_image)
 
+        # Rotate
         resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC", Image.BICUBIC)
         if abs(rotation_angle) > 0.0:
             if rotation_options == "image center":
@@ -349,7 +449,7 @@ class MangaSpeechBubbleOverlay:
             )
 
         merged = Image.alpha_composite(background, composite_layer).convert("RGB")
-        show_help = "Speech bubble overlay for MangaPanelizer"
+        show_help = "Speech bubble overlay - clean edge integration"
         return pil2tensor(merged), show_help
 
 

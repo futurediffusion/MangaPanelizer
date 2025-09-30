@@ -153,8 +153,13 @@ def _draw_pointer(
     draw.polygon(polygon_points, fill=fill_color)
 
     if outline_width > 0:
-        border_line = polygon_points + [polygon_points[0]]
-        draw.line(border_line, fill=outline_color, width=outline_width, joint="curve")
+        outer_border = [
+            base_border_left,
+            tip,
+            base_border_right,
+            base_border_left,
+        ]
+        draw.line(outer_border, fill=outline_color, width=outline_width, joint="curve")
 
 
 class MangaSpeechBubbleOverlay:
@@ -188,7 +193,7 @@ class MangaSpeechBubbleOverlay:
                 "line_spacing": ("INT", {"default": 4, "min": -256, "max": 256}),
                 "pointer_length": (
                     "FLOAT",
-                    {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5},
+                    {"default": 0.0, "min": 0.0, "max": 1024.0, "step": 0.5},
                 ),
                 "pointer_angle": (
                     "FLOAT",

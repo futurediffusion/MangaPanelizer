@@ -87,22 +87,86 @@ def _angle_in_range(angle, start, end):
 
 
 def _point_at_angle_on_rounded_rect(center_x, center_y, half_width, half_height, radius, angle_deg):
-    """Find point on rounded rectangle boundary at given angle from center."""
+    """Find the exact boundary intersection on a rounded rectangle for a ray."""
+
     angle_rad = math.radians(angle_deg)
     dx = math.cos(angle_rad)
     dy = math.sin(angle_rad)
-    
-    # Simple ellipse approximation for main body
-    effective_rx = half_width - radius / 2
-    effective_ry = half_height - radius / 2
-    
-    denom = math.sqrt((dx ** 2) / max(effective_rx ** 2, 0.1) + (dy ** 2) / max(effective_ry ** 2, 0.1))
-    distance = 1.0 / denom if denom > 0 else 0
-    
-    px = center_x + dx * distance
-    py = center_y + dy * distance
-    
-    return px, py
+
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return center_x, center_y
+
+    # Half-width/height of the straight segments (clamp to >= 0).
+    straight_half_width = max(0.0, half_width - radius)
+    straight_half_height = max(0.0, half_height - radius)
+
+    # Try intersecting with the vertical straight edges first.
+    if abs(dx) > 1e-9:
+        sign_x = 1.0 if dx > 0 else -1.0
+        edge_x = center_x + sign_x * half_width
+        t_vertical = (edge_x - center_x) / dx
+        if t_vertical > 0:
+            y_at_edge = center_y + dy * t_vertical
+            if abs(y_at_edge - center_y) <= straight_half_height + 1e-6:
+                return edge_x, y_at_edge
+
+    # Try intersecting with the horizontal straight edges.
+    if abs(dy) > 1e-9:
+        sign_y = 1.0 if dy > 0 else -1.0
+        edge_y = center_y + sign_y * half_height
+        t_horizontal = (edge_y - center_y) / dy
+        if t_horizontal > 0:
+            x_at_edge = center_x + dx * t_horizontal
+            if abs(x_at_edge - center_x) <= straight_half_width + 1e-6:
+                return x_at_edge, edge_y
+
+    # Fall back to the rounded corner arcs.
+    if radius <= 0:
+        # Degenerate case, treat as rectangle
+        # Project to whichever axis is feasible.
+        if abs(dx) > abs(dy):
+            sign_x = 1.0 if dx > 0 else -1.0
+            edge_x = center_x + sign_x * half_width
+            t = (edge_x - center_x) / dx if abs(dx) > 1e-9 else 0
+            return edge_x, center_y + dy * t
+        else:
+            sign_y = 1.0 if dy > 0 else -1.0
+            edge_y = center_y + sign_y * half_height
+            t = (edge_y - center_y) / dy if abs(dy) > 1e-9 else 0
+            return center_x + dx * t, edge_y
+
+    # Determine which corner quadrant we're heading towards.
+    sign_x = 1.0 if dx >= 0 else -1.0
+    sign_y = 1.0 if dy >= 0 else -1.0
+
+    corner_center_x = center_x + sign_x * (straight_half_width)
+    corner_center_y = center_y + sign_y * (straight_half_height)
+
+    # Solve intersection between ray and circle centred at the corner.
+    # Ray: (center_x, center_y) + t * (dx, dy)
+    # Circle: (x - corner_center_x)^2 + (y - corner_center_y)^2 = radius^2
+    rel_cx = center_x - corner_center_x
+    rel_cy = center_y - corner_center_y
+
+    a = dx * dx + dy * dy  # should be 1
+    b = 2 * (dx * rel_cx + dy * rel_cy)
+    c = rel_cx * rel_cx + rel_cy * rel_cy - radius * radius
+
+    discriminant = b * b - 4 * a * c
+    if discriminant < 0:
+        # Numerical fallback – use the corner point directly.
+        return corner_center_x + sign_x * radius, corner_center_y + sign_y * radius
+
+    sqrt_disc = math.sqrt(discriminant)
+    t1 = (-b - sqrt_disc) / (2 * a)
+    t2 = (-b + sqrt_disc) / (2 * a)
+
+    t_candidates = [t for t in (t1, t2) if t > 0]
+    if not t_candidates:
+        return corner_center_x + sign_x * radius, corner_center_y + sign_y * radius
+
+    t_hit = min(t_candidates)
+    return center_x + dx * t_hit, center_y + dy * t_hit
 
 
 def _generate_rounded_rect_points(x0, y0, x1, y1, radius, exclude_start_angle=None, exclude_end_angle=None, segments_per_corner=12):

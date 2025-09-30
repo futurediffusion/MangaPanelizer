@@ -72,8 +72,7 @@ def _draw_text(draw: ImageDraw.ImageDraw,
 
 def _draw_pointer(
     draw: ImageDraw.ImageDraw,
-    bubble_width: int,
-    bubble_height: int,
+    bubble_box: Tuple[float, float, float, float],
     corner_radius: int,
     pointer_length: float,
     pointer_angle: float,
@@ -84,8 +83,15 @@ def _draw_pointer(
     if pointer_length <= 0.0:
         return
 
-    center_x = bubble_width / 2.0
-    center_y = bubble_height / 2.0
+    bubble_x0, bubble_y0, bubble_x1, bubble_y1 = bubble_box
+    bubble_width = bubble_x1 - bubble_x0
+    bubble_height = bubble_y1 - bubble_y0
+
+    if bubble_width <= 0 or bubble_height <= 0:
+        return
+
+    center_x = bubble_x0 + bubble_width / 2.0
+    center_y = bubble_y0 + bubble_height / 2.0
 
     angle_rad = math.radians(pointer_angle % 360.0)
     direction_x = math.cos(angle_rad)
@@ -102,10 +108,6 @@ def _draw_pointer(
     base_border_x = center_x + direction_x * boundary_distance
     base_border_y = center_y + direction_y * boundary_distance
 
-    inner_offset = max(outline_width, 4.0)
-    base_inner_x = base_border_x - direction_x * inner_offset
-    base_inner_y = base_border_y - direction_y * inner_offset
-
     tangent_x = -direction_y
     tangent_y = direction_x
     tangent_length = math.hypot(tangent_x, tangent_y) or 1.0
@@ -114,25 +116,45 @@ def _draw_pointer(
 
     base_half_width = max(pointer_length * 0.25, outline_width * 1.5, 12.0)
 
+    base_border_left = (
+        base_border_x + tangent_x * base_half_width,
+        base_border_y + tangent_y * base_half_width,
+    )
+    base_border_right = (
+        base_border_x - tangent_x * base_half_width,
+        base_border_y - tangent_y * base_half_width,
+    )
+
+    join_offset = max(outline_width * 0.5, 2.0)
     base_inner_left = (
-        base_inner_x + tangent_x * base_half_width,
-        base_inner_y + tangent_y * base_half_width,
+        base_border_left[0] - direction_x * join_offset,
+        base_border_left[1] - direction_y * join_offset,
     )
     base_inner_right = (
-        base_inner_x - tangent_x * base_half_width,
-        base_inner_y - tangent_y * base_half_width,
+        base_border_right[0] - direction_x * join_offset,
+        base_border_right[1] - direction_y * join_offset,
     )
+
+    tip_distance = pointer_length + join_offset
 
     tip = (
-        base_border_x + direction_x * pointer_length,
-        base_border_y + direction_y * pointer_length,
+        base_border_x + direction_x * tip_distance,
+        base_border_y + direction_y * tip_distance,
     )
 
-    draw.polygon([base_inner_left, tip, base_inner_right], fill=fill_color)
+    polygon_points = [
+        base_inner_left,
+        base_border_left,
+        tip,
+        base_border_right,
+        base_inner_right,
+    ]
+
+    draw.polygon(polygon_points, fill=fill_color)
 
     if outline_width > 0:
-        border_line = [base_inner_left, tip, base_inner_right]
-        draw.line(border_line, fill=outline_color, width=outline_width)
+        border_line = polygon_points + [polygon_points[0]]
+        draw.line(border_line, fill=outline_color, width=outline_width, joint="curve")
 
 
 class MangaSpeechBubbleOverlay:
@@ -227,16 +249,35 @@ class MangaSpeechBubbleOverlay:
         image_3d = image[0, :, :, :]
         background = tensor2pil(image_3d).convert("RGBA")
 
-        bubble_image = Image.new("RGBA", (bubble_width, bubble_height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(bubble_image, "RGBA")
-
-        clamped_radius = max(0, min(int(corner_radius), min(bubble_width, bubble_height) // 2))
-
         border_px = max(0.0, float(border_thickness))
         outline_width = int(round(border_px)) if border_px >= 1.0 else 0
 
+        pointer_length_value = float(pointer_length or 0.0)
+        pointer_buffer = 0
+        if pointer_length_value > 0.0:
+            join_offset = max(outline_width * 0.5, 2.0)
+            pointer_buffer = int(math.ceil(pointer_length_value + join_offset + outline_width))
+
+        total_width = bubble_width + pointer_buffer * 2
+        total_height = bubble_height + pointer_buffer * 2
+
+        bubble_bounds = (
+            float(pointer_buffer),
+            float(pointer_buffer),
+            float(pointer_buffer + bubble_width),
+            float(pointer_buffer + bubble_height),
+        )
+
+        bubble_image = Image.new("RGBA", (total_width, total_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(bubble_image, "RGBA")
+
+        clamped_radius = max(
+            0,
+            min(int(corner_radius), min(bubble_width, bubble_height) // 2),
+        )
+
         draw.rounded_rectangle(
-            (0, 0, bubble_width, bubble_height),
+            bubble_bounds,
             radius=clamped_radius,
             fill=(*fill_color, 255),
         )
@@ -245,10 +286,9 @@ class MangaSpeechBubbleOverlay:
         pointer_outline = (*outline_color, 255)
         _draw_pointer(
             draw,
-            bubble_width,
-            bubble_height,
+            bubble_bounds,
             clamped_radius,
-            float(pointer_length or 0.0),
+            pointer_length_value,
             float(pointer_angle or 0.0),
             pointer_fill,
             pointer_outline,
@@ -257,7 +297,7 @@ class MangaSpeechBubbleOverlay:
 
         if outline_width:
             draw.rounded_rectangle(
-                (0, 0, bubble_width, bubble_height),
+                bubble_bounds,
                 radius=clamped_radius,
                 outline=(*outline_color, 255),
                 width=outline_width,
@@ -270,18 +310,22 @@ class MangaSpeechBubbleOverlay:
         line_metrics = _measure_lines(draw, text_lines, font)
 
         text_fill = (*text_color, 255)
+        text_offset_x = pointer_buffer + text_position_x
+        text_offset_y = pointer_buffer + text_position_y
+
         _draw_text(
             draw,
             line_metrics,
             font,
-            text_position_x,
-            text_position_y,
+            text_offset_x,
+            text_offset_y,
             line_spacing,
             text_fill,
         )
 
         composite_layer = Image.new("RGBA", background.size, (0, 0, 0, 0))
-        composite_layer.paste(bubble_image, (position_x, position_y), bubble_image)
+        paste_position = (position_x - pointer_buffer, position_y - pointer_buffer)
+        composite_layer.paste(bubble_image, paste_position, bubble_image)
 
         resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC", Image.BICUBIC)
         if abs(rotation_angle) > 0.0:

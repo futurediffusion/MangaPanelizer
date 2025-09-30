@@ -165,7 +165,7 @@ def _point_at_angle_on_rounded_rect(center_x, center_y, half_width, half_height,
     if not t_candidates:
         return corner_center_x + sign_x * radius, corner_center_y + sign_y * radius
 
-    t_hit = min(t_candidates)
+    t_hit = max(t_candidates)
     return center_x + dx * t_hit, center_y + dy * t_hit
 
 
@@ -242,6 +242,45 @@ def _compute_pointer_base_points(
         candidate_right = (center_x + half_span, edge_y)
         candidate_left = (center_x - half_span, edge_y)
         return _assign_orientation(candidate_right, candidate_left)
+
+    if corner_radius > 0:
+        corner_tolerance = max(1e-3, corner_radius * 1e-3)
+        corners = [
+            (bubble_x0 + corner_radius, bubble_y0 + corner_radius, math.radians(180), math.radians(270)),
+            (bubble_x1 - corner_radius, bubble_y0 + corner_radius, math.radians(270), math.radians(360)),
+            (bubble_x1 - corner_radius, bubble_y1 - corner_radius, 0.0, math.radians(90)),
+            (bubble_x0 + corner_radius, bubble_y1 - corner_radius, math.radians(90), math.radians(180)),
+        ]
+
+        for corner_center_x, corner_center_y, angle_start, angle_end in corners:
+            dx = base_x - corner_center_x
+            dy = base_y - corner_center_y
+            distance = math.hypot(dx, dy)
+
+            if not (corner_radius - corner_tolerance <= distance <= corner_radius + corner_tolerance):
+                continue
+
+            base_angle = math.atan2(dy, dx)
+            base_angle = (base_angle + 2.0 * math.pi) % (2.0 * math.pi)
+            base_angle = _clamp(base_angle, angle_start, angle_end)
+
+            max_delta = (angle_end - angle_start) / 2.0
+            delta = min(half_span / corner_radius, max_delta)
+
+            candidate_a_angle = _clamp(base_angle + delta, angle_start, angle_end)
+            candidate_b_angle = _clamp(base_angle - delta, angle_start, angle_end)
+
+            candidate_a = (
+                corner_center_x + corner_radius * math.cos(candidate_a_angle),
+                corner_center_y + corner_radius * math.sin(candidate_a_angle),
+            )
+            candidate_b = (
+                corner_center_x + corner_radius * math.cos(candidate_b_angle),
+                corner_center_y + corner_radius * math.sin(candidate_b_angle),
+            )
+
+            return _assign_orientation(candidate_a, candidate_b)
+
     if corner_radius > 0 and (on_left or on_right) and (on_top or on_bottom):
         corner_center_x = bubble_x0 + corner_radius if on_left else bubble_x1 - corner_radius
         corner_center_y = bubble_y0 + corner_radius if on_top else bubble_y1 - corner_radius

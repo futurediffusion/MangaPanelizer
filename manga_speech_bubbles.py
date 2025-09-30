@@ -15,6 +15,23 @@ from .core.imaging import pil2tensor, tensor2pil
 ROTATE_OPTIONS = ["text center", "image center"]
 
 
+def _font_directory() -> str:
+    """Return the directory containing bundled speech-bubble fonts."""
+
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)), "fonts")
+
+
+def _available_fonts() -> list[str]:
+    """List available TrueType fonts for speech bubbles."""
+
+    font_dir = _font_directory()
+    return [
+        name
+        for name in os.listdir(font_dir)
+        if os.path.isfile(os.path.join(font_dir, name)) and name.lower().endswith(".ttf")
+    ]
+
+
 def _resolve_color(
     selection: str | None,
     mapping: dict[str, Tuple[int, int, int]],
@@ -567,23 +584,311 @@ def _create_bubble_with_pointer(
     return bubble_img
 
 
+def _create_speech_bubble_base(
+    bubble_width: int,
+    bubble_height: int,
+    corner_radius: int,
+    pointer_length: float,
+    pointer_angle: float,
+    bubble_color: str,
+    border_color: str,
+    border_thickness: float,
+) -> tuple[Image.Image, int]:
+    """Create the base bubble image and return it alongside its pointer buffer."""
+
+    if bubble_width <= 0 or bubble_height <= 0:
+        raise ValueError("Speech bubble dimensions must be greater than zero.")
+
+    fill_color = _resolve_color(bubble_color, color_mapping, "white")
+    outline_color = _resolve_color(border_color, color_mapping, "black")
+
+    border_px = max(0.0, float(border_thickness))
+    outline_width = int(round(border_px)) if border_px >= 1.0 else 0
+
+    pointer_length_value = float(pointer_length or 0.0)
+    pointer_buffer = 0
+    if pointer_length_value > 0.0:
+        pointer_buffer = int(math.ceil(pointer_length_value + outline_width * 2))
+
+    bubble_image = _create_bubble_with_pointer(
+        bubble_width,
+        bubble_height,
+        corner_radius,
+        pointer_length_value,
+        float(pointer_angle or 0.0),
+        (*fill_color, 255),
+        (*outline_color, 255),
+        outline_width,
+        pointer_buffer,
+    )
+
+    return bubble_image, pointer_buffer
+
+
+def _render_speech_bubble_text(
+    bubble_image: Image.Image,
+    pointer_buffer: int,
+    text: str,
+    font_name: str,
+    font_size: int,
+    font_color: str,
+    line_spacing: int,
+    text_position_x: int,
+    text_position_y: int,
+) -> Image.Image:
+    """Render text onto an existing bubble image."""
+
+    working_image = bubble_image.copy()
+    draw = ImageDraw.Draw(working_image, "RGBA")
+    font = _load_font(_font_directory(), font_name, font_size)
+
+    text_lines = text.splitlines() or [""]
+    line_metrics = _measure_lines(draw, text_lines, font)
+
+    text_color = _resolve_color(font_color, color_mapping, "black")
+    text_fill = (*text_color, 255)
+
+    text_offset_x = pointer_buffer + int(text_position_x)
+    text_offset_y = pointer_buffer + int(text_position_y)
+
+    _draw_text(
+        draw,
+        line_metrics,
+        font,
+        text_offset_x,
+        text_offset_y,
+        line_spacing,
+        text_fill,
+    )
+
+    return working_image
+
+
+def _composite_bubble(
+    image_tensor,
+    bubble_image: Image.Image,
+    pointer_buffer: int,
+    bubble_width: int,
+    bubble_height: int,
+    position_x: int,
+    position_y: int,
+    rotation_angle: float,
+    rotation_options: str,
+):
+    """Composite the bubble image onto the provided tensor image."""
+
+    image_3d = image_tensor[0, :, :, :]
+    background = tensor2pil(image_3d).convert("RGBA")
+
+    composite_layer = Image.new("RGBA", background.size, (0, 0, 0, 0))
+    paste_position = (position_x - pointer_buffer, position_y - pointer_buffer)
+    composite_layer.paste(bubble_image, paste_position, bubble_image)
+
+    resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC", Image.BICUBIC)
+    if abs(rotation_angle) > 0.0:
+        if rotation_options == "image center":
+            center = (background.width / 2, background.height / 2)
+        else:
+            center = (
+                position_x + bubble_width / 2,
+                position_y + bubble_height / 2,
+            )
+        composite_layer = composite_layer.rotate(
+            rotation_angle,
+            resample=resampling,
+            expand=False,
+            center=center,
+        )
+
+    merged = Image.alpha_composite(background, composite_layer).convert("RGB")
+    return pil2tensor(merged)
+
+
+class MangaSpeechBubbleBase:
+    """Create the base speech bubble without text."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bubble_width": ("INT", {"default": 450, "min": 32, "max": 2048}),
+                "bubble_height": ("INT", {"default": 200, "min": 32, "max": 2048}),
+                "corner_radius": ("INT", {"default": 40, "min": 1, "max": 100}),
+                "bubble_color": (COLORS, {"default": "white"}),
+                "border_color": (COLORS, {"default": "black"}),
+                "border_thickness": (
+                    "FLOAT",
+                    {"default": 6.0, "min": 0.0, "max": 64.0, "step": 0.5},
+                ),
+                "pointer_length": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 2048.0, "step": 0.5},
+                ),
+                "pointer_angle": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 360.0, "step": 1.0},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "INT")
+    RETURN_NAMES = ("bubble_image", "pointer_buffer", "bubble_width", "bubble_height")
+    FUNCTION = "create"
+    CATEGORY = icons.get("MangaPanelizer/SpeechBubbles", "🗨️ MangaPanelizer/SpeechBubbles")
+
+    def create(
+        self,
+        bubble_width: int,
+        bubble_height: int,
+        corner_radius: int,
+        bubble_color: str,
+        border_color: str,
+        border_thickness: float,
+        pointer_length: float,
+        pointer_angle: float,
+    ):
+        bubble_image, pointer_buffer = _create_speech_bubble_base(
+            bubble_width,
+            bubble_height,
+            corner_radius,
+            pointer_length,
+            pointer_angle,
+            bubble_color,
+            border_color,
+            border_thickness,
+        )
+        return pil2tensor(bubble_image), int(pointer_buffer), int(bubble_width), int(bubble_height)
+
+
+class MangaSpeechBubbleText:
+    """Render text onto an existing speech bubble image."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        font_options = _available_fonts()
+        return {
+            "required": {
+                "bubble_image": ("IMAGE",),
+                "pointer_buffer": ("INT", {"default": 0, "min": 0, "max": 4096}),
+                "bubble_width": ("INT", {"default": 450, "min": 32, "max": 2048}),
+                "bubble_height": ("INT", {"default": 200, "min": 32, "max": 2048}),
+                "text": ("STRING", {"multiline": True, "default": "Say something!"}),
+                "font_name": (font_options,),
+                "font_size": ("INT", {"default": 60, "min": 1, "max": 1024}),
+                "font_color": (COLORS, {"default": "black"}),
+                "line_spacing": ("INT", {"default": 4, "min": -256, "max": 256}),
+            },
+            "optional": {
+                "text_position_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+                "text_position_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "INT")
+    RETURN_NAMES = ("bubble_image", "pointer_buffer", "bubble_width", "bubble_height")
+    FUNCTION = "render"
+    CATEGORY = icons.get("MangaPanelizer/SpeechBubbles", "🗨️ MangaPanelizer/SpeechBubbles")
+
+    def render(
+        self,
+        bubble_image,
+        pointer_buffer: int,
+        bubble_width: int,
+        bubble_height: int,
+        text: str,
+        font_name: str,
+        font_size: int,
+        font_color: str,
+        line_spacing: int,
+        text_position_x: int | None = 0,
+        text_position_y: int | None = 0,
+    ):
+        bubble_pil = tensor2pil(bubble_image[0, :, :, :]).convert("RGBA")
+        rendered = _render_speech_bubble_text(
+            bubble_pil,
+            int(pointer_buffer),
+            text,
+            font_name,
+            font_size,
+            font_color,
+            int(line_spacing),
+            int(text_position_x or 0),
+            int(text_position_y or 0),
+        )
+        return (
+            pil2tensor(rendered),
+            int(pointer_buffer),
+            int(bubble_width),
+            int(bubble_height),
+        )
+
+
+class MangaSpeechBubbleComposite:
+    """Composite a prepared speech bubble onto an image."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "bubble_image": ("IMAGE",),
+                "pointer_buffer": ("INT", {"default": 0, "min": 0, "max": 4096}),
+                "bubble_width": ("INT", {"default": 450, "min": 32, "max": 2048}),
+                "bubble_height": ("INT", {"default": 200, "min": 32, "max": 2048}),
+                "position_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+                "position_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+                "rotation_angle": (
+                    "FLOAT",
+                    {"default": 0.0, "min": -360.0, "max": 360.0, "step": 0.1},
+                ),
+                "rotation_options": (ROTATE_OPTIONS,),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("IMAGE",)
+    FUNCTION = "composite"
+    CATEGORY = icons.get("MangaPanelizer/SpeechBubbles", "🗨️ MangaPanelizer/SpeechBubbles")
+
+    def composite(
+        self,
+        image,
+        bubble_image,
+        pointer_buffer: int,
+        bubble_width: int,
+        bubble_height: int,
+        position_x: int,
+        position_y: int,
+        rotation_angle: float,
+        rotation_options: str,
+    ):
+        bubble_pil = tensor2pil(bubble_image[0, :, :, :]).convert("RGBA")
+        result = _composite_bubble(
+            image,
+            bubble_pil,
+            int(pointer_buffer),
+            int(bubble_width),
+            int(bubble_height),
+            int(position_x),
+            int(position_y),
+            float(rotation_angle),
+            rotation_options,
+        )
+        return (result,)
+
+
 class MangaSpeechBubbleOverlay:
     """Overlay speech-bubble styled text onto an image."""
 
     @classmethod
     def INPUT_TYPES(cls):
-        font_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "fonts")
-        file_list = [
-            f
-            for f in os.listdir(font_dir)
-            if os.path.isfile(os.path.join(font_dir, f)) and f.lower().endswith(".ttf")
-        ]
+        font_options = _available_fonts()
 
         return {
             "required": {
                 "image": ("IMAGE",),
                 "text": ("STRING", {"multiline": True, "default": "Say something!"}),
-                "font_name": (file_list,),
+                "font_name": (font_options,),
                 "font_size": ("INT", {"default": 60, "min": 1, "max": 1024}),
                 "font_color": (COLORS, {"default": "black"}),
                 "bubble_color": (COLORS, {"default": "white"}),
@@ -646,93 +951,55 @@ class MangaSpeechBubbleOverlay:
         text_position_x: int | None = 0,
         text_position_y: int | None = 0,
     ):
-        if bubble_width <= 0 or bubble_height <= 0:
-            raise ValueError("Speech bubble dimensions must be greater than zero.")
+        bubble_image, pointer_buffer = _create_speech_bubble_base(
+            int(bubble_width),
+            int(bubble_height),
+            int(corner_radius),
+            float(pointer_length),
+            float(pointer_angle),
+            bubble_color,
+            border_color,
+            float(border_thickness),
+        )
 
-        text_color = _resolve_color(font_color, color_mapping, "black")
-        fill_color = _resolve_color(bubble_color, color_mapping, "white")
-        outline_color = _resolve_color(border_color, color_mapping, "black")
-
-        text_position_x = int(text_position_x or 0)
-        text_position_y = int(text_position_y or 0)
-
-        image_3d = image[0, :, :, :]
-        background = tensor2pil(image_3d).convert("RGBA")
-
-        border_px = max(0.0, float(border_thickness))
-        outline_width = int(round(border_px)) if border_px >= 1.0 else 0
-
-        pointer_length_value = float(pointer_length or 0.0)
-        pointer_buffer = 0
-        if pointer_length_value > 0.0:
-            pointer_buffer = int(math.ceil(pointer_length_value + outline_width * 2))
-
-        # Create bubble with pointer
-        bubble_image = _create_bubble_with_pointer(
-            bubble_width,
-            bubble_height,
-            corner_radius,
-            pointer_length_value,
-            float(pointer_angle or 0.0),
-            (*fill_color, 255),
-            (*outline_color, 255),
-            outline_width,
+        rendered_bubble = _render_speech_bubble_text(
+            bubble_image,
             pointer_buffer,
+            text,
+            font_name,
+            int(font_size),
+            font_color,
+            int(line_spacing),
+            int(text_position_x or 0),
+            int(text_position_y or 0),
         )
 
-        # Draw text
-        draw = ImageDraw.Draw(bubble_image, "RGBA")
-        font_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "fonts")
-        font = _load_font(font_dir, font_name, font_size)
-
-        text_lines = text.splitlines() or [""]
-        line_metrics = _measure_lines(draw, text_lines, font)
-
-        text_fill = (*text_color, 255)
-        text_offset_x = pointer_buffer + text_position_x
-        text_offset_y = pointer_buffer + text_position_y
-
-        _draw_text(
-            draw,
-            line_metrics,
-            font,
-            text_offset_x,
-            text_offset_y,
-            line_spacing,
-            text_fill,
+        result_image = _composite_bubble(
+            image,
+            rendered_bubble,
+            pointer_buffer,
+            int(bubble_width),
+            int(bubble_height),
+            int(position_x),
+            int(position_y),
+            float(rotation_angle),
+            rotation_options,
         )
 
-        # Composite
-        composite_layer = Image.new("RGBA", background.size, (0, 0, 0, 0))
-        paste_position = (position_x - pointer_buffer, position_y - pointer_buffer)
-        composite_layer.paste(bubble_image, paste_position, bubble_image)
-
-        # Rotate
-        resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC", Image.BICUBIC)
-        if abs(rotation_angle) > 0.0:
-            if rotation_options == "image center":
-                center = (background.width / 2, background.height / 2)
-            else:
-                center = (
-                    position_x + bubble_width / 2,
-                    position_y + bubble_height / 2,
-                )
-            composite_layer = composite_layer.rotate(
-                rotation_angle,
-                resample=resampling,
-                expand=False,
-                center=center,
-            )
-
-        merged = Image.alpha_composite(background, composite_layer).convert("RGB")
         show_help = "Speech bubble overlay - clean edge integration"
-        return pil2tensor(merged), show_help
+        return result_image, show_help
 
 
 NODE_CLASS_MAPPINGS = {
+    "MangaSpeechBubbleBase": MangaSpeechBubbleBase,
+    "MangaSpeechBubbleText": MangaSpeechBubbleText,
+    "MangaSpeechBubbleComposite": MangaSpeechBubbleComposite,
     "MangaSpeechBubbleOverlay": MangaSpeechBubbleOverlay,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "MangaSpeechBubbleBase": "Manga Speech Bubble Base",
+    "MangaSpeechBubbleText": "Manga Speech Bubble Text",
+    "MangaSpeechBubbleComposite": "Manga Speech Bubble Composite",
     "MangaSpeechBubbleOverlay": "Manga Speech Bubble Overlay",
 }

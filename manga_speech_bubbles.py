@@ -11,24 +11,8 @@ from .categories import icons
 from .config import COLORS, color_mapping
 from .core.imaging import pil2tensor, tensor2pil
 
-ALIGN_OPTIONS = ["center", "top", "bottom"]
 ROTATE_OPTIONS = ["text center", "image center"]
-JUSTIFY_OPTIONS = ["center", "left", "right"]
-
-
-def _hex_to_rgb(value: str) -> Tuple[int, int, int]:
-    value = value.strip().lstrip("#")
-    if len(value) != 6:
-        raise ValueError("Expected a 6 character hex value.")
-    return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
-
-
-def _resolve_color(selection: str, mapping: dict[str, Tuple[int, int, int]], hex_value: str | None = None) -> Tuple[int, int, int]:
-    if selection == "custom" and hex_value:
-        try:
-            return _hex_to_rgb(hex_value)
-        except ValueError:
-            return mapping.get("black", (0, 0, 0))
+def _resolve_color(selection: str, mapping: dict[str, Tuple[int, int, int]]) -> Tuple[int, int, int]:
     return mapping.get(selection, mapping.get("black", (0, 0, 0)))
 
 
@@ -54,49 +38,16 @@ def _measure_lines(draw: ImageDraw.ImageDraw, lines: Sequence[str], font: ImageF
     return measurements
 
 
-def _text_block_size(lines: Sequence[Tuple[str, int, int]], line_spacing: int) -> Tuple[int, int]:
-    max_width = 0
-    total_height = 0
-
-    for index, (_, width, height) in enumerate(lines):
-        max_width = max(max_width, width)
-        total_height += height
-        if index < len(lines) - 1:
-            total_height += line_spacing
-    return max_width, total_height
-
-
-def _compute_start_y(bubble_height: int, content_height: int, margins: int, align: str) -> float:
-    if align == "top":
-        return float(margins)
-    if align == "bottom":
-        return float(bubble_height - margins - content_height)
-    return float((bubble_height - content_height) / 2)
-
-
-def _compute_line_x(bubble_width: int, line_width: int, margins: int, justify: str) -> float:
-    if justify == "left":
-        return float(margins)
-    if justify == "right":
-        return float(bubble_width - margins - line_width)
-    return float((bubble_width - line_width) / 2)
-
-
 def _draw_text(draw: ImageDraw.ImageDraw,
                lines: Sequence[Tuple[str, int, int]],
                font: ImageFont.FreeTypeFont,
-               bubble_width: int,
-               bubble_height: int,
-               margins: int,
+               text_position_x: int,
+               text_position_y: int,
                line_spacing: int,
-               align: str,
-               justify: str,
                fill: Tuple[int, int, int, int]) -> None:
-    _, content_height = _text_block_size(lines, line_spacing)
-    cursor_y = _compute_start_y(bubble_height, content_height, margins, align)
-
+    cursor_y = float(text_position_y)
     for index, (line, width, height) in enumerate(lines):
-        x = _compute_line_x(bubble_width, width, margins, justify)
+        x = float(text_position_x)
         draw.text((x, cursor_y), line, font=font, fill=fill)
         cursor_y += height
         if index < len(lines) - 1:
@@ -121,24 +72,20 @@ class MangaSpeechBubbleOverlay:
                 "text": ("STRING", {"multiline": True, "default": "Say something!"}),
                 "font_name": (file_list,),
                 "font_size": ("INT", {"default": 60, "min": 1, "max": 1024}),
-                "font_color": (COLORS,),
-                "bubble_color": (COLORS,),
-                "border_color": (COLORS,),
+                "font_color": (COLORS, {"default": "black"}),
+                "bubble_color": (COLORS, {"default": "white"}),
+                "border_color": (COLORS, {"default": "black"}),
                 "border_thickness": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 64.0, "step": 0.5}),
-                "bubble_width": ("INT", {"default": 360, "min": 32, "max": 2048}),
-                "bubble_height": ("INT", {"default": 320, "min": 32, "max": 2048}),
+                "bubble_width": ("INT", {"default": 450, "min": 32, "max": 2048}),
+                "bubble_height": ("INT", {"default": 200, "min": 32, "max": 2048}),
                 "corner_radius": ("INT", {"default": 40, "min": 1, "max": 100}),
-                "align": (ALIGN_OPTIONS,),
-                "justify": (JUSTIFY_OPTIONS,),
-                "margins": ("INT", {"default": 24, "min": -512, "max": 512}),
+                "text_position_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+                "text_position_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
                 "line_spacing": ("INT", {"default": 4, "min": -256, "max": 256}),
                 "position_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
                 "position_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
                 "rotation_angle": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0, "step": 0.1}),
                 "rotation_options": (ROTATE_OPTIONS,),
-            },
-            "optional": {
-                "font_color_hex": ("STRING", {"multiline": False, "default": "#000000"}),
             },
         }
 
@@ -160,20 +107,18 @@ class MangaSpeechBubbleOverlay:
         bubble_width,
         bubble_height,
         corner_radius,
-        align,
-        justify,
-        margins,
+        text_position_x,
+        text_position_y,
         line_spacing,
         position_x,
         position_y,
         rotation_angle,
         rotation_options,
-        font_color_hex="#000000",
     ):
         if bubble_width <= 0 or bubble_height <= 0:
             raise ValueError("Speech bubble dimensions must be greater than zero.")
 
-        text_color = _resolve_color(font_color, color_mapping, font_color_hex)
+        text_color = _resolve_color(font_color, color_mapping)
         fill_color = _resolve_color(bubble_color, color_mapping)
         outline_color = _resolve_color(border_color, color_mapping)
 
@@ -207,12 +152,9 @@ class MangaSpeechBubbleOverlay:
             draw,
             line_metrics,
             font,
-            bubble_width,
-            bubble_height,
-            margins,
+            text_position_x,
+            text_position_y,
             line_spacing,
-            align,
-            justify,
             text_fill,
         )
 

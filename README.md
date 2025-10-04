@@ -18,7 +18,7 @@ MangaPanelizer es un paquete de nodos personalizados para ComfyUI enfocado en di
 2. Clona el repositorio o copia esta carpeta: `git clone https://github.com/your-user/MangaPanelizer.git`.
 3. Reinicia ComfyUI. Encontrarás el nodo bajo **MangaPanelizer / Templates**.
 
-## Nodo disponible
+## Nodos disponibles
 ### CR_ComicPanelTemplates
 Genera una página completa y devuelve:
 - `image`: tensor de imagen listo para ComfyUI.
@@ -38,6 +38,14 @@ Genera una página completa y devuelve:
 
 #### Entradas opcionales
 - `images`: lote de tensores. Cada panel recibe la siguiente imagen disponible; si faltan, se rellenan con el color del panel.
+
+### Manga Speech Bubble Overlay
+Colección de nodos para crear globos de diálogo y superponerlos sobre tus páginas:
+- **MangaSpeechBubbleBase**: prepara la capa del globo con bordes suavizados y punta ajustable.
+- **MangaSpeechBubbleText**: compone el texto con fuentes incluidas y espaciado configurable.
+- **MangaSpeechBubbleComposite**: combina base y texto en una sola imagen.
+- **MangaSpeechBubbleOverlay**: integra el globo final sobre tu página o panel.
+Todos comparten la misma paleta `COLORS` y admiten ajustes de posición, rotación y colores personalizables.
 
 ## Plantillas incluidas
 ```

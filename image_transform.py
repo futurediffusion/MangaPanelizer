@@ -53,7 +53,7 @@ def _pil_list_to_tensor(images: List[Image.Image]) -> torch.Tensor:
     return batch
 
 
-class Image_transform:
+class MangaImageTransform:
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -64,13 +64,13 @@ class Image_transform:
                 "zoom": ("FLOAT", {"default": 1.0, "min": 0.001, "step": 0.01}),
                 "angle": ("FLOAT", {"default": 0, "step": 1, "min": -360, "max": 360}),
                 "shear": ("FLOAT", {"default": 0, "step": 1, "min": -4096, "max": 4096}),
-                "border_handling": (["edge", "constant", "reflect", "symmetric"], {"default": "edge"}),
+                "border_handling": (["edge", "constant", "reflect", "symmetric"], {"default": "reflect"}),
             },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "transform"
-    CATEGORY = "Apt_Preset/image"
+    CATEGORY = "MangaPanelizer/Image"
 
     def transform(
         self,
@@ -80,7 +80,7 @@ class Image_transform:
         zoom: float,
         angle: float,
         shear: float,
-        border_handling: str = "edge",
+        border_handling: str = "reflect",
     ):
         if image.size(0) == 0:
             return (image,)

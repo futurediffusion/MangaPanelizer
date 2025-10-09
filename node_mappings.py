@@ -12,7 +12,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "CR_ComicPanelTemplates": "MangaPanelizer Panel Templates",
+    "CR_ComicPanelTemplates": "MangaPanelizer",
     "MangaImageTransform": "Manga Image Transform",
     **SPEECH_BUBBLE_DISPLAY_NAMES,
 }

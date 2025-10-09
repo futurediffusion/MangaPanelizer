@@ -72,7 +72,7 @@ class CR_ComicPanelTemplates:
                 "border_thickness": ("INT", {"default": 10, "min": 0, "max": 1024}),
                 "outline_thickness": ("INT", {"default": 10, "min": 0, "max": 1024}),
                 "internal_padding": ("INT", {"default": 20, "min": 0, "max": 1024}),
-                "custom_panel_layout": ("STRING", {"multiline": True, "default": "H12", "forceInput": True}),
+                "custom_panel_layout": ("STRING", {"multiline": True, "default": "H12"}),
                 "first_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_angle_adjust"}),
                 "second_division_angle": ("INT", {"default": 0, "min": -30, "max": 30, "label": "diagonal_slant_offset"}),
                 "division_position": ("INT", {"default": 0, "min": -100, "max": 100, "label": "Division Position"}),
